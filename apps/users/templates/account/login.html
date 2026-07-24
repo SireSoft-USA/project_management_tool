@@ -6,15 +6,6 @@
 {% block content %}
   <div class="w-96 px-4 py-4">
     <div>
-      <h2 class="text-center text-2xl font-bold text-base-content">
-        {% translate "Sign In" %}
-      </h2>
-      {% comment %} <div class="text-sm text-center mt-2">
-        {% translate "Don't have an account?" %}
-        <a href="{% url 'account_signup' %}" class="font-medium mt-link">
-          {% translate "Sign up." %}
-        </a>
-      </div> {% endcomment %}
       <form class="mt-6 space-y-6" method="post">
         {% csrf_token %}
         {{ form.non_field_errors }}
@@ -24,7 +15,18 @@
           <input class="btn btn-primary btn-block" type="submit" value="{% translate "Sign In" %}">
         </div>
       </form>
+
       {% include 'accounts/includes/social/social_buttons.html' %}
+
+      <!-- Copyright -->
+      <div class="text-center text-xs text-base-content/50 mt-6">
+        © 2026 
+        <a href="https://siresoft.com/" class="text-[#0525A8] hover:underline font-medium">
+          SireSoft
+        </a> 
+        - All rights reserved. A LoneGroup Company.
+      </div>
+
     </div>
   </div>
 {% endblock %}

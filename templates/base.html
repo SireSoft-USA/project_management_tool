@@ -62,9 +62,9 @@
     {% block body %}
     {% endblock body %}
 
-    {% block footer %}
+    {% comment %} {% block footer %}
       {% include 'includes/footer.html' %}
-    {% endblock footer %}
+    {% endblock footer %} {% endcomment %}
   {% endblock body_wrapper %}
   {% block page_js %}
   {% endblock page_js %}
