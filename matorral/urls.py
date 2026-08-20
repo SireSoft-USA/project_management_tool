@@ -68,6 +68,8 @@ urlpatterns = [
     # ),
     path("accounts/", include("allauth.urls")),  # Signup functionality commented out
     path("users/", include("apps.users.urls")),
+    # Unsubscribe links in emails — must resolve without an authenticated session.
+    path("notifications/", include("apps.notifications.urls")),
     path("", include("apps.landing_pages.urls")),
     path("celery-progress/", include("celery_progress.urls")),
     # hijack urls for impersonation

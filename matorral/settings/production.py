@@ -32,4 +32,5 @@ ANYMAIL = {
     "MAILGUN_SENDER_DOMAIN": env("MAILGUN_SENDER_DOMAIN", default=None),
 }
 
-ADMINS = ["matagus@gmail.com"]
+# Inherited from base settings; set the ADMINS env var (comma-separated addresses)
+# to receive unhandled-exception mail in production.

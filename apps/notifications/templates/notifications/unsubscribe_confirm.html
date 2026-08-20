@@ -1,0 +1,29 @@
+{% extends "anonymous_base.html" %}
+{% load i18n %}
+
+{% block page_title %}{% translate "Unsubscribe" %}{% endblock %}
+
+{% block content %}
+  <div class="card bg-base-100 shadow-sm max-w-lg w-full">
+    <div class="card-body">
+      <h2 class="card-title">{% translate "Unsubscribe from notification emails?" %}</h2>
+
+      <p class="text-base-content/70">
+        {% blocktranslate trimmed with email=preference.user.email %}
+          This will stop all notification emails to {{ email }}, including task
+          assignments and workspace invitations.
+        {% endblocktranslate %}
+      </p>
+
+      <p class="text-base-content/70">
+        {% translate "You will still receive account emails such as password resets." %}
+      </p>
+
+      {# POST, not a link: GET must never mutate — mail clients prefetch links. #}
+      <form method="post" class="card-actions justify-end mt-4">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-primary">{% translate "Unsubscribe" %}</button>
+      </form>
+    </div>
+  </div>
+{% endblock %}

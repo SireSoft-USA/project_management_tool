@@ -1,0 +1,34 @@
+{% extends "anonymous_base.html" %}
+{% load i18n %}
+
+{% block page_title %}{% translate "Unsubscribed" %}{% endblock %}
+
+{% block content %}
+  <div class="card bg-base-100 shadow-sm max-w-lg w-full">
+    <div class="card-body">
+      <h2 class="card-title">{% translate "You've been unsubscribed" %}</h2>
+
+      <p class="text-base-content/70">
+        {% blocktranslate trimmed with email=preference.user.email %}
+          {{ email }} will no longer receive notification emails.
+        {% endblocktranslate %}
+      </p>
+
+      <p class="text-base-content/70">
+        {% translate "Changed your mind? Sign in and turn notifications back on from your notification settings." %}
+      </p>
+
+      <div class="card-actions justify-end mt-4">
+        {% if user.is_authenticated %}
+          <a href="{% url 'notifications:preferences' %}" class="btn btn-primary">
+            {% translate "Notification settings" %}
+          </a>
+        {% else %}
+          <a href="{% url 'account_login' %}?next={% url 'notifications:preferences' %}" class="btn btn-primary">
+            {% translate "Sign in" %}
+          </a>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+{% endblock %}

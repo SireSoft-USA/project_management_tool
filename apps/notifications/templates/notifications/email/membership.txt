@@ -1,0 +1,13 @@
+{% load i18n %}{% if actor_name %}{% blocktranslate trimmed with actor=actor_name workspace=workspace.name %}
+{{ actor }} added you to the {{ workspace }} workspace. You can now see its projects and the tasks assigned to you.
+{% endblocktranslate %}{% else %}{% blocktranslate trimmed with workspace=workspace.name %}
+You've been added to the {{ workspace }} workspace. You can now see its projects and the tasks assigned to you.
+{% endblocktranslate %}{% endif %}
+
+{% translate "Open workspace" %}: {{ workspace_url }}
+
+--
+{% blocktranslate trimmed %}
+You received this because you were added to a workspace on {{ server_url }}.
+{% endblocktranslate %}
+{% translate "Unsubscribe" %}: {{ unsubscribe_url }}

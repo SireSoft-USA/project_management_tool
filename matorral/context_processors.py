@@ -2,8 +2,21 @@ from django.conf import settings
 from django.contrib.sites.models import Site
 
 
-def get_root(is_secure: bool = settings.USE_HTTPS_IN_ABSOLUTE_URLS) -> str:
-    protocol = settings.USE_HTTPS_IN_ABSOLUTE_URLS and "https" or "http"
+def get_root(is_secure: bool | None = None) -> str:
+    """Return the site root URL (scheme + domain), with no trailing slash.
+
+    Used to build absolute URLs for links that leave the request cycle — emails,
+    most importantly — where Django cannot derive the host from the request.
+
+    Args:
+        is_secure: Force the scheme. Defaults to USE_HTTPS_IN_ABSOLUTE_URLS.
+
+    The setting is read at call time (not as a default argument) so that
+    @override_settings works in tests and at runtime.
+    """
+    if is_secure is None:
+        is_secure = settings.USE_HTTPS_IN_ABSOLUTE_URLS
+    protocol = "https" if is_secure else "http"
     return f"{protocol}://{Site.objects.get_current().domain}"
 
 

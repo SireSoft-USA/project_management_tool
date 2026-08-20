@@ -1,6 +1,7 @@
 from django.apps import apps
 from django.conf import settings
 from django.contrib import messages
+from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -27,6 +28,7 @@ from apps.issues.helpers import (
 )
 from apps.issues.models import BaseIssue, Bug, BugSeverity, Epic, IssuePriority, IssueStatus, Subtask
 from apps.issues.services import IssueConversionError, PromotionError, convert_issue_type, promote_to_epic
+from apps.notifications.services import notify_assignment
 from apps.projects.models import Project
 from apps.sprints.models import Sprint
 from apps.utils.progress import build_progress_dict
@@ -44,6 +46,23 @@ from .mixins import (
     IssueViewMixin,
     WorkspaceIssueViewMixin,
 )
+
+User = get_user_model()
+
+
+def _resolve_user(value):
+    """Return a User for a form-initial value that may be a pk or an instance.
+
+    ModelForm.initial holds the raw pk for a ForeignKey when the form was built
+    from an instance, but callers may also pass the instance itself. Both are
+    normalised here so assignee comparisons are instance-to-instance.
+    """
+    if value is None or isinstance(value, User):
+        return value
+    try:
+        return User.objects.get(pk=value)
+    except (User.DoesNotExist, TypeError, ValueError):
+        return None
 
 
 class WorkspaceIssueListView(
@@ -456,6 +475,11 @@ class IssueUpdateView(
         # updated by ModelForm._post_clean during is_valid, so use form.initial)
         old_status = form.initial.get("status")
 
+        # Same reason: read the previous assignee from form.initial, since
+        # self.object.assignee already holds the submitted value. initial stores
+        # the raw pk, so resolve it to an instance for comparison.
+        old_assignee = _resolve_user(form.initial.get("assignee"))
+
         # Handle parent change (move in tree)
         new_parent = form.cleaned_data.get("parent")
         current_parent = self.object.get_parent_issue()
@@ -473,6 +497,13 @@ class IssueUpdateView(
             else:
                 # Move under new parent
                 self.object.move(new_parent, pos="last-child")
+
+        notify_assignment(
+            self.object,
+            new_assignee=self.object.assignee,
+            actor=self.request.user,
+            old_assignee=old_assignee,
+        )
 
         messages.success(
             self.request,
@@ -1159,6 +1190,8 @@ class IssueRowInlineEditView(LoginAndWorkspaceRequiredMixin, IssueViewMixin, Vie
 
         if form.is_valid():
             old_status = real_issue.status
+            # Captured before the assignment below overwrites it.
+            old_assignee = real_issue.assignee
 
             # Update issue fields
             real_issue.title = form.cleaned_data["title"]
@@ -1173,6 +1206,13 @@ class IssueRowInlineEditView(LoginAndWorkspaceRequiredMixin, IssueViewMixin, Vie
                 real_issue.estimated_points = form.cleaned_data.get("estimated_points")
 
             real_issue.save()
+
+            notify_assignment(
+                real_issue,
+                new_assignee=real_issue.assignee,
+                actor=request.user,
+                old_assignee=old_assignee,
+            )
 
             # Return display mode
             response = render(request, display_template, context)
@@ -1362,6 +1402,8 @@ class IssueDetailInlineEditView(LoginAndWorkspaceRequiredMixin, IssueViewMixin, 
         if form.is_valid():
             real_issue = context["issue"]
             old_status = real_issue.status
+            # Captured before the assignment below overwrites it.
+            old_assignee = real_issue.assignee
 
             # Update issue fields
             real_issue.title = form.cleaned_data["title"]
@@ -1377,6 +1419,13 @@ class IssueDetailInlineEditView(LoginAndWorkspaceRequiredMixin, IssueViewMixin, 
                 real_issue.severity = form.cleaned_data["severity"]
 
             real_issue.save()
+
+            notify_assignment(
+                real_issue,
+                new_assignee=real_issue.assignee,
+                actor=request.user,
+                old_assignee=old_assignee,
+            )
 
             # Handle parent change (move in tree)
             new_parent = form.cleaned_data.get("parent")
