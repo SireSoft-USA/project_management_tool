@@ -21,12 +21,17 @@ dependencies = [
     "django-celery-beat",
     "django-comments-xtd>=2.10.11",
     "django-environ",
-    "django-health-check",
+    # Pinned: 4.x removed health_check.db / contrib.celery / contrib.redis,
+    # which INSTALLED_APPS still references, so Django fails to start on 4.x.
+    "django-health-check<4",
     "django-hijack",
     "django-htmx",
     "django-polymorphic>=4.11.2",
     "django-storages",
-    "django-treebeard>=5.0.5",
+    # Pinned: 6.0+ turns the treebeard.E001 manager check into a hard error.
+    # IssueManager must subclass PolymorphicManager (django-polymorphic), so it
+    # cannot also subclass MP_NodeManager and the app will not boot on 6.x/7.x.
+    "django-treebeard>=5.0.5,<6",
     "django-vite>=3.1.0",
     "django-waffle",
     "django-watchfiles",

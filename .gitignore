@@ -34,3 +34,10 @@ openapitools.json
 
 scripts/
 fly.toml
+
+# local (non-Docker) setup artifacts
+matorral.egg-info/
+
+# Local (non-Docker) environment pins — not used by the Docker/production build,
+# which installs from pyproject.toml.
+requirements-local.txt

@@ -15,6 +15,7 @@ from apps.issues.helpers import (
     calculate_valid_page,
 )
 from apps.issues.models import BaseIssue, Bug, Chore, Epic, IssuePriority, IssueStatus, Milestone, Story
+from apps.notifications.services import notify_bulk_assignment
 from apps.projects.models import Project
 from apps.sprints.models import Sprint
 from apps.utils.filters import count_active_filters, get_status_filter_label, parse_status_filter
@@ -614,6 +615,12 @@ class WorkspaceIssueBulkAssigneeView(WorkspaceBulkActionMixin, LoginAndWorkspace
         )
 
         if assignee:
+            # queryset.update() bypasses save() and signals, so the notification has
+            # to be raised explicitly here. Only issues whose assignee actually
+            # changed are passed on, so re-assigning to the same person stays silent.
+            newly_assigned = [obj for obj in objects if obj.assignee_id != assignee.pk]
+            notify_bulk_assignment(newly_assigned, new_assignee=assignee, actor=self.request.user)
+
             messages.success(
                 self.request,
                 _("%(count)d issue(s) assigned to %(assignee)s.") % {"count": updated_count, "assignee": new_display},

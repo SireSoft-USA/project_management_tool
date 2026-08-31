@@ -57,7 +57,7 @@
           <table border="0" cellpadding="0" cellspacing="0" width="600" style="max-width: 600px;">
             <tr>
               <td align="left" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
-                <span style="font-size: 24px; font-weight: 700; color: #a3b18a; letter-spacing: -0.5px;">Matorral</span>
+                <span style="font-size: 24px; font-weight: 700; color: #a3b18a; letter-spacing: -0.5px;">{{ current_site.name|default:"Siresoft" }}</span>
               </td>
             </tr>
           </table>
@@ -127,10 +127,12 @@
             <tr>
               <td align="center" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 13px; color: #a3b18a; line-height: 1.5;">
                 {% block footer %}
-                  <p style="margin: 0 0 8px 0;">
-                   {% translate "This email was sent to you because you created an account on" %} <a target="_blank" href="https://{{ current_site.domain }}" style="color: #3f5c0c;">{{ current_site.name }}.</a>
-                  </p>
-                  <p style="margin: 0;">If you didn't request this, you can safely ignore this email.</p>
+                  {% if current_site.domain %}
+                    <p style="margin: 0 0 8px 0;">
+                     {% translate "This email was sent to you because you created an account on" %} <a target="_blank" href="{{ server_url|default:current_site.domain }}" style="color: #3f5c0c;">{{ current_site.name }}.</a>
+                    </p>
+                  {% endif %}
+                  <p style="margin: 0;">{% translate "If you didn't request this, you can safely ignore this email." %}</p>
                 {% endblock %}
               </td>
             </tr>

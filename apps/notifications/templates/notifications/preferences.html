@@ -1,0 +1,40 @@
+{% extends "apps/base.html" %}
+{% load i18n %}
+
+{% block app_content_content %}
+<div id="page-content" hx-target="#page-content">
+  {% partialdef page-content inline %}
+  <section class="app-card mt-form-page">
+    <h1 class="text-xl font-semibold mb-1">{% translate "Notification emails" %}</h1>
+    <p class="text-base-content/70 mb-6">
+      {% translate "Choose which emails you'd like to receive. Account emails, such as password resets, are always sent." %}
+    </p>
+
+    <form method="post">
+      {% csrf_token %}
+
+      {% for field in form %}
+        <div class="form-control mb-4">
+          <label class="label cursor-pointer justify-start gap-4">
+            {{ field }}
+            <span>
+              <span class="label-text font-medium">{{ field.label }}</span>
+              {% if field.help_text %}
+                <span class="block text-sm text-base-content/60">{{ field.help_text }}</span>
+              {% endif %}
+            </span>
+          </label>
+          {% for error in field.errors %}
+            <span class="text-error text-sm">{{ error }}</span>
+          {% endfor %}
+        </div>
+      {% endfor %}
+
+      <div class="flex justify-end mt-6">
+        <button type="submit" class="btn btn-primary">{% translate "Save preferences" %}</button>
+      </div>
+    </form>
+  </section>
+  {% endpartialdef page-content %}
+</div>
+{% endblock %}

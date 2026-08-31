@@ -1,0 +1,49 @@
+{% extends "account/email/email_template_base.html" %}
+{% load i18n %}
+
+{% block title %}{% blocktranslate with workspace=workspace.name %}Added to {{ workspace }}{% endblocktranslate %}{% endblock %}
+
+{% block preheader %}{% blocktranslate with workspace=workspace.name %}You now have access to {{ workspace }}{% endblocktranslate %}{% endblock %}
+
+{% block email_title %}{% blocktranslate with workspace=workspace.name %}Welcome to {{ workspace }}{% endblocktranslate %}{% endblock %}
+
+{% block message_body %}
+  {% if actor_name %}
+    {% blocktranslate trimmed with actor=actor_name workspace=workspace.name %}
+      {{ actor }} added you to the {{ workspace }} workspace. You can now see its
+      projects and the tasks assigned to you.
+    {% endblocktranslate %}
+  {% else %}
+    {% blocktranslate trimmed with workspace=workspace.name %}
+      You've been added to the {{ workspace }} workspace. You can now see its
+      projects and the tasks assigned to you.
+    {% endblocktranslate %}
+  {% endif %}
+{% endblock %}
+
+{% block cta_link %}{{ workspace_url }}{% endblock %}
+{% block cta_text %}{% translate "Open workspace" %}{% endblock %}
+
+{% block cta_fallback %}
+  <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #ffffff;">
+    <tr>
+      <td align="center" style="padding: 0 20px 30px;">
+        <div style="max-width: 600px; font-size: 13px; color: #6b7280; word-break: break-all; text-align: center;">
+          {% translate "If the button doesn't work, paste this into your browser:" %}<br>
+          <a href="{{ workspace_url }}" style="color: #3f5c0c;">{{ workspace_url }}</a>
+        </div>
+      </td>
+    </tr>
+  </table>
+{% endblock %}
+
+{% block footer %}
+  <p style="margin: 0 0 8px 0;">
+    {% blocktranslate trimmed %}
+      You received this because you were added to a workspace on {{ server_url }}.
+    {% endblocktranslate %}
+  </p>
+  <p style="margin: 0;">
+    <a href="{{ unsubscribe_url }}" style="color: #3f5c0c;">{% translate "Unsubscribe from these emails" %}</a>
+  </p>
+{% endblock %}

@@ -1,0 +1,16 @@
+{% load i18n %}{% if actor_name %}{% blocktranslate trimmed with actor=actor_name workspace=workspace.name %}
+{{ actor }} assigned {{ count }} tasks to you in {{ workspace }}.
+{% endblocktranslate %}{% else %}{% blocktranslate trimmed with workspace=workspace.name %}
+{{ count }} tasks were assigned to you in {{ workspace }}.
+{% endblocktranslate %}{% endif %}
+{% for row in issues %}
+- {{ row.issue.key }} {{ row.issue.title }}
+  {{ row.url }}
+{% endfor %}
+{% translate "View all tasks" %}: {{ workspace_url }}
+
+--
+{% blocktranslate trimmed %}
+You received this because tasks were assigned to you on {{ server_url }}.
+{% endblocktranslate %}
+{% translate "Unsubscribe" %}: {{ unsubscribe_url }}

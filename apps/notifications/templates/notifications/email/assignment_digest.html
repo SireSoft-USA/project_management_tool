@@ -1,0 +1,49 @@
+{% extends "account/email/email_template_base.html" %}
+{% load i18n %}
+
+{% block title %}{% blocktranslate %}{{ count }} tasks assigned to you{% endblocktranslate %}{% endblock %}
+
+{% block preheader %}{% blocktranslate trimmed with workspace=workspace.name %}
+  {{ count }} tasks in {{ workspace }}
+{% endblocktranslate %}{% endblock %}
+
+{% block email_title %}{% blocktranslate %}{{ count }} tasks were assigned to you{% endblocktranslate %}{% endblock %}
+
+{% block message_body %}
+  {% if actor_name %}
+    {% blocktranslate trimmed with actor=actor_name workspace=workspace.name %}
+      {{ actor }} assigned {{ count }} tasks to you in {{ workspace }}.
+    {% endblocktranslate %}
+  {% else %}
+    {% blocktranslate trimmed with workspace=workspace.name %}
+      {{ count }} tasks were assigned to you in {{ workspace }}.
+    {% endblocktranslate %}
+  {% endif %}
+
+  <table border="0" cellpadding="0" cellspacing="0" width="100%" style="margin: 20px 0;">
+    {% for row in issues %}
+      <tr>
+        <td style="padding: 8px 0 8px 16px; border-left: 3px solid #588157;">
+          <div style="font-size: 13px; color: #6b7280;">{{ row.issue.key }}</div>
+          <a href="{{ row.url }}" style="font-size: 16px; font-weight: 600; color: #344e41; text-decoration: none;">
+            {{ row.issue.title }}
+          </a>
+        </td>
+      </tr>
+    {% endfor %}
+  </table>
+{% endblock %}
+
+{% block cta_link %}{{ workspace_url }}{% endblock %}
+{% block cta_text %}{% translate "View all tasks" %}{% endblock %}
+
+{% block footer %}
+  <p style="margin: 0 0 8px 0;">
+    {% blocktranslate trimmed %}
+      You received this because tasks were assigned to you on {{ server_url }}.
+    {% endblocktranslate %}
+  </p>
+  <p style="margin: 0;">
+    <a href="{{ unsubscribe_url }}" style="color: #3f5c0c;">{% translate "Unsubscribe from these emails" %}</a>
+  </p>
+{% endblock %}

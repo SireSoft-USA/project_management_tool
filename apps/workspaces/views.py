@@ -17,6 +17,7 @@ from apps.users.models import User
 from apps.workspaces.mixins import LoginAndWorkspaceRequiredMixin
 
 from allauth.account.models import EmailAddress
+
 # from allauth.account.views import SignupView
 from django_htmx.http import HttpResponseClientRedirect
 

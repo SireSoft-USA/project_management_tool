@@ -1,12 +1,59 @@
 import logging
+from smtplib import SMTPException
 
 from django.apps import apps
+from django.core.mail import EmailMultiAlternatives
 
+from apps.notifications.emails import copy_recipients
 from apps.workspaces.demo_data import create_demo_project
 
 from celery import shared_task
 
 logger = logging.getLogger(__name__)
+
+
+@shared_task(
+    autoretry_for=(SMTPException, ConnectionError, TimeoutError, OSError),
+    retry_backoff=True,
+    retry_backoff_max=600,
+    retry_jitter=True,
+    max_retries=5,
+    soft_time_limit=30,
+    time_limit=45,
+    ignore_result=True,
+)
+def send_invitation_email(invitation_id: str) -> bool:
+    """Deliver a workspace invitation email.
+
+    Runs off the request cycle so a slow mail server cannot fail the invite, and
+    retries on transport errors instead of losing the message.
+    """
+    # Imported here to avoid a circular import: invitations.py imports this task.
+    from apps.workspaces.invitations import render_invitation_email  # noqa: PLC0415
+
+    Invitation = apps.get_model("workspaces", "Invitation")
+
+    try:
+        invitation = Invitation.objects.select_related("workspace", "invited_by").get(pk=invitation_id)
+    except Invitation.DoesNotExist:
+        # Cancelled between queueing and delivery; nothing to send.
+        logger.info("Invitation %s no longer exists, skipping email", invitation_id)
+        return False
+
+    parts = render_invitation_email(invitation)
+    message = EmailMultiAlternatives(
+        subject=parts["subject"],
+        body=parts["message"],
+        from_email=parts["from_email"],
+        to=parts["recipient_list"],
+        # Copy the monitoring addresses, same as notification email.
+        **copy_recipients(exclude=parts["recipient_list"]),
+    )
+    message.attach_alternative(parts["html_message"], "text/html")
+    # fail_silently=False so transport errors raise and the retry policy applies.
+    message.send(fail_silently=False)
+    logger.info("Invitation email sent to %s", invitation.email)
+    return True
 
 
 @shared_task

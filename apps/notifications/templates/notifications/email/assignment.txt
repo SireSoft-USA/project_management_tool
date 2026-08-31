@@ -1,0 +1,20 @@
+{% load i18n %}{% if actor_name %}{% blocktranslate trimmed with actor=actor_name type=issue_type|lower %}
+{{ actor }} assigned this {{ type }} to you.
+{% endblocktranslate %}{% else %}{% blocktranslate trimmed with type=issue_type|lower %}
+This {{ type }} was assigned to you.
+{% endblocktranslate %}{% endif %}
+
+{{ project.name }} · {{ issue.key }}
+{{ issue.title }}
+
+{% translate "Status" %}: {{ issue.get_status_display }}
+{% translate "Priority" %}: {{ issue.get_priority_display }}{% if issue.due_date %}
+{% translate "Due" %}: {{ issue.due_date }}{% endif %}
+
+{% translate "View task" %}: {{ issue_url }}
+
+--
+{% blocktranslate trimmed %}
+You received this because a task was assigned to you on {{ server_url }}.
+{% endblocktranslate %}
+{% translate "Unsubscribe" %}: {{ unsubscribe_url }}

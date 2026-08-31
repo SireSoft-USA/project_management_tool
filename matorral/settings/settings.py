@@ -89,6 +89,7 @@ PROJECT_APPS = [
     "apps.projects.apps.ProjectsConfig",
     "apps.issues.apps.IssuesConfig",
     "apps.sprints.apps.SprintsConfig",
+    "apps.notifications.apps.NotificationsConfig",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + PROJECT_APPS
@@ -325,10 +326,28 @@ DEFAULT_AUTO_FIELD = "django.db.models.AutoField"
 FORMS_URLFIELD_ASSUME_HTTPS = True
 
 
+# --- Sites ---
+#
+# Defined before the email block because the "From" address defaults are derived
+# from SITE_NAME/SITE_DOMAIN.
+
+SITE_ID = 1
+
+# Host used to build absolute URLs in emails (see matorral.context_processors.get_root).
+# The django.contrib.sites row is kept in sync with these by the
+# landing_pages.0001_configure_site data migration, which runs on every deploy.
+# Must be the real, user-reachable host or emailed links will be broken.
+SITE_DOMAIN = env("SITE_DOMAIN", default="localhost:8000")
+SITE_NAME = env("SITE_NAME", default="Siresoft")
+
+
 # --- Email ---
 
-SERVER_EMAIL = env("SERVER_EMAIL", default="noreply@localhost:8000")
-DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="matagus@gmail.com")
+# "From" address on every outgoing email. Set DEFAULT_FROM_EMAIL in the environment
+# to an address on a domain you control and have authenticated (SPF/DKIM), otherwise
+# mail lands in spam or is rejected outright.
+SERVER_EMAIL = env("SERVER_EMAIL", default=f"noreply@{SITE_DOMAIN}")
+DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default=f"{SITE_NAME} <noreply@{SITE_DOMAIN}>")
 
 # Console backend prints emails locally; override in .env or production settings.
 EMAIL_BACKEND = env("EMAIL_BACKEND", default="django.core.mail.backends.console.EmailBackend")
@@ -339,12 +358,37 @@ EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=True)
 EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")
 EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
 
-EMAIL_SUBJECT_PREFIX = "[matorral] "
+# Applied by mail_admins()/mail_managers() only — not to ordinary mail. Notification
+# subjects are self-describing, so they carry no prefix.
+EMAIL_SUBJECT_PREFIX = env("EMAIL_SUBJECT_PREFIX", default=f"[{SITE_NAME}] ")
+
+# Guard rail: a timed-out SMTP connection holds a worker thread. Keep it short —
+# notification email is queued through Celery and retried, so failing fast is safe.
+EMAIL_TIMEOUT = env.int("EMAIL_TIMEOUT", default=10)
 
 
-# --- Sites ---
+# --- Notifications ---
 
-SITE_ID = 1
+# Master switch. Set to False to silence every notification email at once —
+# useful when restoring a production database into staging, where real addresses
+# would otherwise be mailed.
+NOTIFICATIONS_ENABLED = env.bool("NOTIFICATIONS_ENABLED", default=True)
+
+# Assigning more than this many issues to one person in a single bulk action sends
+# one summary email instead of one per issue. Prevents a 200-issue bulk assign from
+# dropping 200 messages in somebody's inbox (and tripping provider rate limits).
+NOTIFICATION_BULK_THRESHOLD = env.int("NOTIFICATION_BULK_THRESHOLD", default=10)
+
+# Addresses copied on every outgoing notification and invitation email, for
+# monitoring or record keeping. Comma-separated; empty disables copying.
+NOTIFICATION_COPY_TO = env.list("NOTIFICATION_COPY_TO", default=[])
+
+# How those addresses are copied:
+#   "bcc" (default) — hidden from recipients. Recommended: a CC header exposes the
+#          monitoring address to everyone who receives a notification, and shows up
+#          in reply-all.
+#   "cc"  — visible in the message header.
+NOTIFICATION_COPY_MODE = env("NOTIFICATION_COPY_MODE", default="bcc").strip().lower()
 
 
 # --- Pagination ---
@@ -426,7 +470,9 @@ SITE_KEYWORDS = (
 
 USE_HTTPS_IN_ABSOLUTE_URLS = env.bool("USE_HTTPS_IN_ABSOLUTE_URLS", default=False)
 
-ADMINS = ["matagus@gmail.com"]
+# Recipients of unhandled-exception mail (django.core.mail.mail_admins).
+# Django 6 expects plain address strings, not (name, address) pairs.
+ADMINS = env.list("ADMINS", default=[])
 
 GOOGLE_ANALYTICS_ID = env("GOOGLE_ANALYTICS_ID", default="")
 

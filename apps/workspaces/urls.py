@@ -67,11 +67,11 @@ _global_patterns = [
         views.accept_invitation,
         name="accept_invitation",
     ),
-#     path(
-#         "invitation/<slug:invitation_id>/signup/",
-#         views.SignupAfterInvite.as_view(),
-#         name="signup_after_invite",
-#     ),
+    #     path(
+    #         "invitation/<slug:invitation_id>/signup/",
+    #         views.SignupAfterInvite.as_view(),
+    #         name="signup_after_invite",
+    #     ),
 ]
 
 # Combined patterns for mounting at /w/ — all under the "workspaces" namespace
