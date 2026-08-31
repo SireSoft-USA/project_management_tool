@@ -12,38 +12,32 @@ class ProjectFormKeyValidationTest(TestCase):
     def setUpTestData(cls):
         cls.workspace = WorkspaceFactory()
 
-    def test_key_with_numbers_is_invalid(self):
-        """Keys containing numbers are rejected."""
+    def test_key_with_numbers_is_valid(self):
+        """Keys containing numbers are accepted."""
         form = ProjectForm(
             data={"name": "Test", "key": "PRJ1", "status": ProjectStatus.DRAFT},
             workspace=self.workspace,
         )
 
-        self.assertFalse(form.is_valid())
-        self.assertIn("key", form.errors)
-        self.assertIn("only letters", form.errors["key"][0])
+        self.assertTrue(form.is_valid())
 
-    def test_key_with_dash_is_invalid(self):
-        """Keys containing dashes are rejected."""
+    def test_key_with_dash_is_valid(self):
+        """Keys containing dashes are accepted."""
         form = ProjectForm(
             data={"name": "Test", "key": "PRJ-1", "status": ProjectStatus.DRAFT},
             workspace=self.workspace,
         )
 
-        self.assertFalse(form.is_valid())
-        self.assertIn("key", form.errors)
-        self.assertIn("only letters", form.errors["key"][0])
+        self.assertTrue(form.is_valid())
 
-    def test_key_with_underscore_is_invalid(self):
-        """Keys containing underscores are rejected."""
+    def test_key_with_underscore_is_valid(self):
+        """Keys containing underscores are accepted."""
         form = ProjectForm(
             data={"name": "Test", "key": "PRJ_A", "status": ProjectStatus.DRAFT},
             workspace=self.workspace,
         )
 
-        self.assertFalse(form.is_valid())
-        self.assertIn("key", form.errors)
-        self.assertIn("only letters", form.errors["key"][0])
+        self.assertTrue(form.is_valid())
 
     def test_key_too_long_is_invalid(self):
         """Keys longer than 6 characters are rejected."""

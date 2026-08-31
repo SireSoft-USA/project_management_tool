@@ -14,8 +14,16 @@
            class="checkbox checkbox-sm"
            disabled>
   </td>
-  <td>
-    <span class="font-mono font-semibold text-base-content/60">{{ project.key }}</span>
+    <td>
+    <input type="text"
+           name="key"
+           value="{{ form.key.value|default:project.key }}"
+           class="input input-sm input-bordered w-full font-mono {% if form.key.errors %}input-error{% endif %}"
+           maxlength="6"
+           required>
+    {% if form.key.errors %}
+    <span class="text-error text-xs">{{ form.key.errors.0 }}</span>
+    {% endif %}
   </td>
   <td>
     <input type="text"

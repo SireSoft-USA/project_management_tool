@@ -9,7 +9,15 @@
   <div class="flex justify-between items-start mb-4">
     <div class="flex-1">
       <div class="flex items-center gap-2 mb-2">
-        <span class="font-mono text-sm text-gray-500">{{ project.key }}</span>
+        <input type="text"
+               name="key"
+               value="{{ form.key.value|default:project.key }}"
+               class="input input-sm input-bordered font-mono w-32 {% if form.key.errors %}input-error{% endif %}"
+               maxlength="6"
+               required>
+        {% if form.key.errors %}
+        <span class="text-error text-xs">{{ form.key.errors.0 }}</span>
+        {% endif %}
       </div>
       <input type="text"
              name="name"

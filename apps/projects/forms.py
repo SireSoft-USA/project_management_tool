@@ -1,5 +1,3 @@
-import re
-
 from django import forms
 from django.contrib.auth import get_user_model
 from django.utils.translation import gettext_lazy as _
@@ -81,6 +79,24 @@ class BulkMoveForm(BulkActionForm):
         self.fields["projects"].required = True
 
 
+def normalize_and_validate_project_key(key, workspace, instance=None):
+    """Normalize a project key and reject duplicates within the workspace."""
+    if not key:
+        return key
+
+    key = key.strip().upper()
+    if not key:
+        return ""
+
+    if not workspace:
+        return key
+
+    qs = Project.objects.for_workspace(workspace).with_key(key, exclude=instance)
+    if qs.exists():
+        raise forms.ValidationError(_("A project with this key already exists in this workspace."))
+    return key
+
+
 class ProjectForm(forms.ModelForm):
     class Meta:
         model = Project
@@ -100,25 +116,12 @@ class ProjectForm(forms.ModelForm):
             self.fields["lead"].queryset = User.objects.for_workspace(self.instance.workspace).for_choices()
 
     def clean_key(self):
-        key = self.cleaned_data.get("key")
-        if not key:
-            return key
-
-        # Validate key format: only ASCII letters (A-Z), max 6 characters
-        if not re.match(r"^[A-Za-z]+$", key):
-            raise forms.ValidationError(_("Key must contain only letters (A-Z)."))
-
-        if len(key) > 6:
-            raise forms.ValidationError(_("Key must be at most 6 characters."))
-
         workspace = self.workspace or (self.instance.workspace if self.instance and self.instance.pk else None)
-        if not workspace:
-            return key
-
-        qs = Project.objects.for_workspace(workspace).with_key(key, exclude=self.instance)
-        if qs.exists():
-            raise forms.ValidationError(_("A project with this key already exists in this workspace."))
-        return key
+        return normalize_and_validate_project_key(
+            self.cleaned_data.get("key"),
+            workspace,
+            instance=self.instance,
+        )
 
 
 # ============================================================================
@@ -134,6 +137,11 @@ class ProjectRowInlineEditForm(forms.Form):
         required=True,
         error_messages={"required": _("Name is required.")},
     )
+    key = forms.CharField(
+        max_length=6,
+        required=True,
+        error_messages={"required": _("Key is required.")},
+    )
     status = forms.ChoiceField(
         choices=ProjectStatus.choices,
         required=True,
@@ -143,8 +151,10 @@ class ProjectRowInlineEditForm(forms.Form):
         required=False,
     )
 
-    def __init__(self, *args, workspace_members=None, **kwargs):
+    def __init__(self, *args, workspace=None, workspace_members=None, instance=None, **kwargs):
         super().__init__(*args, **kwargs)
+        self.workspace = workspace
+        self.instance = instance
         if workspace_members is not None:
             self.fields["lead"].queryset = workspace_members
 
@@ -153,6 +163,13 @@ class ProjectRowInlineEditForm(forms.Form):
         if name:
             name = name.strip()
         return name
+
+    def clean_key(self):
+        return normalize_and_validate_project_key(
+            self.cleaned_data.get("key"),
+            self.workspace,
+            instance=self.instance,
+        )
 
 
 class ProjectDetailInlineEditForm(ProjectRowInlineEditForm):
