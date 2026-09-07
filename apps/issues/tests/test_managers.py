@@ -1,13 +1,17 @@
 from datetime import date, timedelta
 
 from django.test import TestCase
+from django.utils import timezone
 
+from apps.issues.activity import EPIC_INACTIVITY_ALERT_AFTER
 from apps.issues.factories import BugFactory, ChoreFactory, EpicFactory, MilestoneFactory, StoryFactory, SubtaskFactory
 from apps.issues.models import BaseIssue, Bug, Epic, IssueStatus, Milestone, Story
 from apps.projects.factories import ProjectFactory
 from apps.sprints.factories import SprintFactory
 from apps.users.factories import UserFactory
 from apps.workspaces.factories import WorkspaceFactory
+
+from auditlog.models import LogEntry
 
 
 class IssueQuerySetForProjectTest(TestCase):
@@ -540,3 +544,127 @@ class IssueQuerySetWithProgressTest(TestCase):
         self.assertEqual(0, e.total_in_progress_points)
         self.assertEqual(0, e.total_todo_points)
         self.assertEqual(0, e.total_estimated_points)
+
+
+class RecordStoryActivityTest(TestCase):
+    """Tests for IssueManager.record_story_activity — the single write point that
+    resets an Epic's inactivity clock when meaningful Story work happens."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.project = ProjectFactory()
+
+    def _stale(self, **kwargs):
+        """Create an Epic whose clock has already run out, so any reset is visible."""
+        epic = EpicFactory(project=self.project, **kwargs)
+        long_ago = timezone.now() - timedelta(days=30)
+        Epic.objects.filter(pk=epic.pk).update(last_activity_at=long_ago, inactivity_alert_due_at=long_ago)
+        epic.refresh_from_db()
+        return epic
+
+    def test_accepts_a_single_pk(self):
+        """Callers with one Epic shouldn't have to wrap it in a list."""
+        epic = self._stale()
+
+        updated = BaseIssue.objects.record_story_activity(epic.pk)
+
+        self.assertEqual(1, updated)
+
+    def test_pushes_the_due_date_a_full_grace_period_into_the_future(self):
+        epic = self._stale()
+        before = timezone.now()
+
+        BaseIssue.objects.record_story_activity(epic.pk)
+
+        epic.refresh_from_db()
+        self.assertGreaterEqual(epic.inactivity_alert_due_at, before + EPIC_INACTIVITY_ALERT_AFTER)
+
+    def test_moves_last_activity_at_to_now(self):
+        epic = self._stale()
+        before = timezone.now()
+
+        BaseIssue.objects.record_story_activity(epic.pk)
+
+        epic.refresh_from_db()
+        self.assertGreaterEqual(epic.last_activity_at, before)
+
+    def test_updates_several_epics_in_one_call(self):
+        """Bulk Story actions can span multiple Epics; all must be reset."""
+        first, second = self._stale(), self._stale()
+
+        updated = BaseIssue.objects.record_story_activity([first.pk, second.pk])
+
+        self.assertEqual(2, updated)
+        for epic in (first, second):
+            epic.refresh_from_db()
+            self.assertGreater(epic.inactivity_alert_due_at, timezone.now())
+
+    def test_costs_one_query_regardless_of_how_many_epics(self):
+        """The whole design depends on this being a single UPDATE, never a loop."""
+        epics = [self._stale(), self._stale(), self._stale()]
+
+        with self.assertNumQueries(1):
+            BaseIssue.objects.record_story_activity([e.pk for e in epics])
+
+    def test_empty_input_is_a_no_op_without_touching_the_database(self):
+        """Bulk callers may pass an empty set; that must not cost a query."""
+        with self.assertNumQueries(0):
+            self.assertEqual(0, BaseIssue.objects.record_story_activity([]))
+
+    def test_none_values_are_ignored(self):
+        """A Story with no Epic parent yields None; it must not blow up."""
+        with self.assertNumQueries(0):
+            self.assertEqual(0, BaseIssue.objects.record_story_activity([None, None]))
+
+    def test_mixed_none_and_real_ids_updates_only_the_real_ones(self):
+        epic = self._stale()
+
+        updated = BaseIssue.objects.record_story_activity([None, epic.pk])
+
+        self.assertEqual(1, updated)
+
+    def test_done_epic_is_not_resurrected(self):
+        """Work logged against an already-finished Epic must not push its clock
+        forward — finished work is never nagged about, and must never be made
+        eligible again by late Story activity."""
+        epic = self._stale(status=IssueStatus.DONE)
+        due_at_before = epic.inactivity_alert_due_at
+
+        updated = BaseIssue.objects.record_story_activity(epic.pk)
+
+        self.assertEqual(0, updated)
+        epic.refresh_from_db()
+        self.assertEqual(due_at_before, epic.inactivity_alert_due_at)
+
+    def test_wont_do_epic_is_not_resurrected(self):
+        epic = self._stale(status=IssueStatus.WONT_DO)
+        self.assertEqual(0, BaseIssue.objects.record_story_activity(epic.pk))
+
+    def test_archived_epic_is_not_resurrected(self):
+        epic = self._stale(status=IssueStatus.ARCHIVED)
+        self.assertEqual(0, BaseIssue.objects.record_story_activity(epic.pk))
+
+    def test_in_progress_epic_is_updated(self):
+        """Only terminal statuses are exempt — active work must still reset."""
+        epic = self._stale(status=IssueStatus.IN_PROGRESS)
+        self.assertEqual(1, BaseIssue.objects.record_story_activity(epic.pk))
+
+    def test_only_the_named_epics_are_touched(self):
+        """A reset must not bleed into unrelated Epics."""
+        target, bystander = self._stale(), self._stale()
+        bystander_due_at = bystander.inactivity_alert_due_at
+
+        BaseIssue.objects.record_story_activity(target.pk)
+
+        bystander.refresh_from_db()
+        self.assertEqual(bystander_due_at, bystander.inactivity_alert_due_at)
+
+    def test_does_not_write_an_audit_log_entry(self):
+        """Activity tracking is internal bookkeeping. Routing it through
+        queryset.update() (not save()) keeps it out of the user-facing history."""
+        epic = self._stale()
+        before = LogEntry.objects.filter(object_id=epic.pk).count()
+
+        BaseIssue.objects.record_story_activity(epic.pk)
+
+        self.assertEqual(before, LogEntry.objects.filter(object_id=epic.pk).count())

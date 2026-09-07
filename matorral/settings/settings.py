@@ -437,6 +437,17 @@ SCHEDULED_TASKS = {
         "schedule": schedules.crontab(minute=0, hour=7),
         "expire_seconds": 60 * 60,
     },
+    # Hourly rather than daily so an epic is alerted within an hour of falling
+    # due, and hourly rather than more often because a 7-day threshold gains
+    # nothing from minute-level precision. The sweep is a single indexed query,
+    # so a run that finds nothing due costs almost nothing.
+    "send-epic-inactivity-alerts": {
+        "task": "apps.issues.tasks.send_epic_inactivity_alerts",
+        "schedule": timedelta(minutes=60),
+        # Expire before the next run: a task still queued an hour later is stale,
+        # and the following sweep will pick up whatever is still due anyway.
+        "expire_seconds": 60 * 60,
+    },
 }
 
 

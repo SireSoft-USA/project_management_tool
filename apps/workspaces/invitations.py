@@ -6,6 +6,7 @@ from django.db import transaction
 from django.template.loader import render_to_string
 from django.utils.translation import gettext_lazy as _
 
+from apps.notifications.emails import build_logo_url
 from apps.notifications.services import notify_member_added
 from apps.users.models import User
 
@@ -27,6 +28,7 @@ def render_invitation_email(invitation) -> dict:
         "current_site": current_site,
         # Correct scheme for the environment (http locally, https in production).
         "server_url": get_root(),
+        "logo_url": build_logo_url(),
     }
     return {
         "subject": _("You're invited to {}!").format(current_site.name),

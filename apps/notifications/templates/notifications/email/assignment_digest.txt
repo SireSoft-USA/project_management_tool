@@ -3,6 +3,7 @@
 {% endblocktranslate %}{% else %}{% blocktranslate trimmed with workspace=workspace.name %}
 {{ count }} tasks were assigned to you in {{ workspace }}.
 {% endblocktranslate %}{% endif %}
+{% translate "Assigned to" %}: {{ recipient_name }}
 {% for row in issues %}
 - {{ row.issue.key }} {{ row.issue.title }}
   {{ row.url }}

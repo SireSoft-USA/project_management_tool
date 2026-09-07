@@ -13,6 +13,7 @@ from django.apps import apps
 from apps.notifications.dispatch import (
     build_assignment_digest_message,
     build_assignment_message,
+    build_epic_inactivity_message,
     build_membership_message,
 )
 from apps.notifications.emails import send_notification
@@ -81,6 +82,28 @@ def send_membership_email(workspace_id: int, recipient_id: int, actor_id: int | 
 
     actor = _get(User, actor_id) if actor_id else None
     return send_notification(**build_membership_message(workspace=workspace, recipient=recipient, actor=actor))
+
+
+@shared_task(**TASK_KWARGS)
+def send_epic_inactivity_email(epic_id: int, recipient_id: int, inactive_days: int) -> bool:
+    """Email an epic's assignee that it has had no story activity for a week.
+
+    The alert has already been claimed by the time this runs (see
+    Epic.objects.claim_inactivity_alert), so a retry after a transport failure
+    re-sends the same alert rather than a duplicate one — the claim is what
+    prevents duplicates, not this task.
+    """
+    Epic = apps.get_model("issues", "Epic")
+    User = apps.get_model("users", "User")
+
+    epic = _get(Epic.objects.select_related("project", "project__workspace"), epic_id, label="epic")
+    recipient = _get(User, recipient_id, label="recipient")
+    if epic is None or recipient is None:
+        return False
+
+    return send_notification(
+        **build_epic_inactivity_message(epic=epic, recipient=recipient, inactive_days=inactive_days)
+    )
 
 
 def _load(issue_id: int, recipient_id: int, actor_id: int | None):

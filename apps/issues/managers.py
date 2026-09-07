@@ -6,6 +6,7 @@ from django.db.models import Case, F, Func, IntegerField, OuterRef, Q, Subquery,
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
+from apps.issues.activity import EPIC_INACTIVITY_ALERT_AFTER
 from apps.issues.utils import get_work_item_ctype_ids
 
 from polymorphic.managers import PolymorphicManager
@@ -135,6 +136,42 @@ class IssueQuerySet(MP_NodeQuerySet, PolymorphicQuerySet):
     def overdue(self) -> IssueQuerySet:
         """Filter to overdue issues (due_date in the past and not done/archived/won't do)."""
         return self.filter(due_date__lt=timezone.now().date()).exclude(
+            status__in=[self.model.status_model.DONE, self.model.status_model.ARCHIVED, self.model.status_model.WONT_DO]
+        )
+
+    def due_for_inactivity_alert(self, now=None) -> IssueQuerySet:
+        """Epics that have gone long enough without Story activity to be alerted.
+
+        The entire check is `inactivity_alert_due_at <= now` against an indexed,
+        nullable column. Nothing here reads Stories: activity was recorded to that
+        column as it happened (see apps.issues.activity), so the scheduler never
+        aggregates or scans child rows no matter how large the tree grows.
+
+        NULL means no alert is pending — either the Epic is finished, or one was
+        already sent for the current period of silence — and NULL rows are
+        excluded automatically by the comparison.
+
+        Terminal Epics are filtered out as well. Step 7 already clears their due
+        date on the way into a terminal status, so this is belt and braces: a row
+        that somehow kept a stale date (an older migration, a direct SQL edit)
+        must still never produce an alert about finished work.
+
+        Must be called on Epic.objects: inactivity_alert_due_at is a column on the
+        Epic table, not on BaseIssue. Calling it on the polymorphic base manager
+        would otherwise fail with an opaque FieldError about an unknown keyword.
+
+        Args:
+            now: Override the comparison instant. Tests use it to travel in time
+                without touching rows; production leaves it unset.
+        """
+        Epic = apps.get_model("issues", "Epic")
+        if self.model is not Epic:
+            raise TypeError(
+                f"due_for_inactivity_alert() is an Epic query, but was called on "
+                f"{self.model.__name__}.objects. Use Epic.objects.due_for_inactivity_alert()."
+            )
+
+        return self.filter(inactivity_alert_due_at__lte=now or timezone.now()).exclude(
             status__in=[self.model.status_model.DONE, self.model.status_model.ARCHIVED, self.model.status_model.WONT_DO]
         )
 
@@ -278,3 +315,166 @@ class IssueManager(PolymorphicManager):
 
     def done(self) -> IssueQuerySet:
         return self.get_queryset().done()
+
+    def due_for_inactivity_alert(self, now=None) -> IssueQuerySet:
+        return self.get_queryset().due_for_inactivity_alert(now=now)
+
+    def claim_inactivity_alert(self, epic_id, now=None) -> bool:
+        """Take ownership of one Epic's pending inactivity alert.
+
+        Returns True exactly once per period of silence. The caller may send the
+        email only if it gets True.
+
+        The claim is a single conditional UPDATE: clear inactivity_alert_due_at,
+        but only for a row where it is still set and still in the past. The
+        database applies that atomically, so if two workers (or an overlapping
+        run of the same hourly task) reach the same Epic, only one UPDATE matches
+        a row — the other sees zero rows affected and declines. No lock is taken
+        and no row is read first, so there is nothing to dead-lock on.
+
+        The same mechanism handles the race against real work: if someone adds a
+        Story microseconds before the claim, the recording call has already
+        pushed the due date into the future, so the `__lte=now` condition no
+        longer matches and the alert is correctly abandoned rather than sent
+        about an Epic that just became active.
+
+        Args:
+            epic_id: The Epic to claim.
+            now: The instant the run is judged against; the scheduler passes one
+                value for the whole batch so every Epic is treated consistently.
+
+        Returns:
+            True if this call won the claim and must send the alert.
+        """
+        Epic = apps.get_model("issues", "Epic")
+
+        claimed = Epic.objects.filter(
+            pk=epic_id,
+            inactivity_alert_due_at__lte=now or timezone.now(),
+        ).update(inactivity_alert_due_at=None)
+
+        return claimed == 1
+
+    def record_story_activity(self, epic_ids) -> int:
+        """Mark meaningful Story work against one or more parent Epics.
+
+        This is the single write point for Epic inactivity tracking. Every caller
+        that changes a Story in a way that counts as work (apps.issues.activity
+        defines exactly what does and does not count) funnels through here, so
+        the rules live in one place instead of being re-derived at each call site.
+
+        Deliberately a single UPDATE against the Epic table rather than
+        load-modify-save: it costs one query regardless of how many Epics are
+        passed, never loads an Epic into Python, and cannot fire Epic's own
+        save()/signals (which would re-enter the notification and auditlog paths
+        for what is internal bookkeeping, not a user edit).
+
+        Terminal Epics are excluded rather than updated: work logged against an
+        Epic that is already Done/Won't Do/Archived must not resurrect a pending
+        alert for it.
+
+        Args:
+            epic_ids: A single Epic pk or an iterable of them. Empty input is a
+                no-op, so bulk callers can pass a possibly-empty set unguarded.
+
+        Returns:
+            The number of Epic rows actually updated.
+        """
+        Epic = apps.get_model("issues", "Epic")
+        BaseIssue = apps.get_model("issues", "BaseIssue")
+
+        if isinstance(epic_ids, int):
+            epic_ids = [epic_ids]
+        epic_ids = [pk for pk in epic_ids if pk is not None]
+        if not epic_ids:
+            return 0
+
+        now = timezone.now()
+        terminal_statuses = [s for s, category in BaseIssue.status_categories.items() if category == "done"]
+
+        return (
+            Epic.objects.filter(pk__in=epic_ids)
+            .exclude(status__in=terminal_statuses)
+            .update(
+                last_activity_at=now,
+                inactivity_alert_due_at=now + EPIC_INACTIVITY_ALERT_AFTER,
+            )
+        )
+
+    def sync_inactivity_clock_for_status(self, epic_ids) -> None:
+        """Align Epics' inactivity clocks with their current status after a bulk
+        status change.
+
+        Epic.save() handles this for every path that saves a model instance, but
+        the bulk status view and the cascade helper both use queryset.update(),
+        which never calls save(). Those call this instead.
+
+        Two statements rather than one because the two transitions are opposites:
+        finishing an Epic clears its pending alert, reopening one starts a fresh
+        grace period. Both are filtered so they only touch rows that actually need
+        changing, keeping this cheap when a bulk action mixes Epics and work items.
+
+        Args:
+            epic_ids: An iterable of candidate Epic pks. Non-Epic pks are ignored
+                because they simply do not match rows in the Epic table. Passing
+                an empty iterable costs no query, so callers that usually select
+                no Epics (most bulk actions) pay nothing.
+        """
+        Epic = apps.get_model("issues", "Epic")
+        BaseIssue = apps.get_model("issues", "BaseIssue")
+
+        epic_ids = [pk for pk in epic_ids if pk is not None]
+        if not epic_ids:
+            return
+
+        terminal_statuses = [s for s, category in BaseIssue.status_categories.items() if category == "done"]
+
+        # Finished: drop any pending alert.
+        Epic.objects.filter(pk__in=epic_ids, status__in=terminal_statuses).exclude(inactivity_alert_due_at=None).update(
+            inactivity_alert_due_at=None
+        )
+
+        # Reopened: restart the countdown from now rather than resuming a stale one.
+        Epic.objects.filter(pk__in=epic_ids, inactivity_alert_due_at=None).exclude(status__in=terminal_statuses).update(
+            inactivity_alert_due_at=timezone.now() + EPIC_INACTIVITY_ALERT_AFTER
+        )
+
+    def record_story_activity_by_parent_path(self, parent_paths) -> int:
+        """Record Story activity against parent Epics identified by tree path.
+
+        Treebeard's get_parent() costs a query per node, which would tax every
+        Story save just to discover a pk. The parent's path is derivable from the
+        child's in pure Python (see story_parent_path), so callers pass that
+        instead and this resolves and updates in the same statement.
+
+        Rows whose path belongs to a Milestone rather than an Epic simply do not
+        match the Epic table, so no type check is needed — a Story parented
+        directly to a Milestone correctly records nothing.
+
+        Args:
+            parent_paths: One path string or an iterable of them. Empty input is
+                a no-op costing no query.
+
+        Returns:
+            The number of Epic rows actually updated.
+        """
+        Epic = apps.get_model("issues", "Epic")
+        BaseIssue = apps.get_model("issues", "BaseIssue")
+
+        if isinstance(parent_paths, str):
+            parent_paths = [parent_paths]
+        parent_paths = [path for path in parent_paths if path]
+        if not parent_paths:
+            return 0
+
+        now = timezone.now()
+        terminal_statuses = [s for s, category in BaseIssue.status_categories.items() if category == "done"]
+
+        return (
+            Epic.objects.filter(path__in=parent_paths)
+            .exclude(status__in=terminal_statuses)
+            .update(
+                last_activity_at=now,
+                inactivity_alert_due_at=now + EPIC_INACTIVITY_ALERT_AFTER,
+            )
+        )

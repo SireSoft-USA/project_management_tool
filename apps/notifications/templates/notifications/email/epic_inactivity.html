@@ -1,42 +1,39 @@
 {% extends "account/email/email_template_base.html" %}
 {% load i18n %}
 
-{% block title %}{% blocktranslate %}{{ issue_type }} assigned to you{% endblocktranslate %}{% endblock %}
+{% block title %}{% translate "Epic with no recent activity" %}{% endblock %}
 
 {# Shown as the inbox preview line, next to the subject. #}
-{% block preheader %}{{ issue.key }} — {{ issue.title }}{% endblock %}
+{% block preheader %}{{ epic.key }} — {{ epic.title }}{% endblock %}
 
-{% block email_title %}{% translate "A task was assigned to you" %}{% endblock %}
+{% block email_title %}{% translate "This epic has gone quiet" %}{% endblock %}
 
 {% block message_body %}
-  {% if actor_name %}
-    {% blocktranslate trimmed with actor=actor_name type=issue_type|lower %}
-      {{ actor }} assigned this {{ type }} to you.
-    {% endblocktranslate %}
-  {% else %}
-    {% blocktranslate trimmed with type=issue_type|lower %}
-      This {{ type }} was assigned to you.
-    {% endblocktranslate %}
-  {% endif %}
+  {% blocktranslate trimmed with days=inactive_days %}
+    No stories have been added to this epic, and no work has been done on its
+    existing stories, for {{ days }} days.
+  {% endblocktranslate %}
 
   <table border="0" cellpadding="0" cellspacing="0" width="100%" style="margin: 20px 0; border-left: 3px solid #1a7be4;">
     <tr>
       <td style="padding: 4px 0 4px 16px;">
         <div style="font-size: 13px; color: #6b7280; margin-bottom: 4px;">
-          {{ project.name }} &middot; {{ issue.key }}
+          {{ project.name }} &middot; {{ epic.key }}
         </div>
         <div style="font-size: 18px; font-weight: 600; color: #04306d; line-height: 1.4;">
-          {{ issue.title }}
+          {{ epic.title }}
         </div>
         <div style="font-size: 13px; color: #6b7280; margin-top: 8px;">
           {% translate "Assigned to" %}: {{ recipient_name }}
         </div>
         <div style="font-size: 13px; color: #6b7280; margin-top: 4px;">
-          {% translate "Status" %}: {{ issue.get_status_display }}
+          {% translate "Status" %}: {{ epic.get_status_display }}
           &nbsp;&middot;&nbsp;
-          {% translate "Priority" %}: {{ issue.get_priority_display }}
-          {% if issue.due_date %}
-            &nbsp;&middot;&nbsp;{% translate "Due" %}: {{ issue.due_date }}
+          {% translate "Priority" %}: {{ epic.get_priority_display }}
+          &nbsp;&middot;&nbsp;
+          {% translate "Last activity" %}: {{ last_activity_at|date:"j M Y" }}
+          {% if epic.due_date %}
+            &nbsp;&middot;&nbsp;{% translate "Due" %}: {{ epic.due_date }}
           {% endif %}
         </div>
       </td>
@@ -44,8 +41,8 @@
   </table>
 {% endblock %}
 
-{% block cta_link %}{{ issue_url }}{% endblock %}
-{% block cta_text %}{% translate "View task" %}{% endblock %}
+{% block cta_link %}{{ epic_url }}{% endblock %}
+{% block cta_text %}{% translate "View epic" %}{% endblock %}
 
 {% block cta_fallback %}
   <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #ffffff;">
@@ -53,7 +50,7 @@
       <td align="center" style="padding: 0 20px 30px;">
         <div style="max-width: 600px; font-size: 13px; color: #6b7280; word-break: break-all; text-align: center;">
           {% translate "If the button doesn't work, paste this into your browser:" %}<br>
-          <a href="{{ issue_url }}" style="color: #04306d;">{{ issue_url }}</a>
+          <a href="{{ epic_url }}" style="color: #04306d;">{{ epic_url }}</a>
         </div>
       </td>
     </tr>
@@ -63,7 +60,8 @@
 {% block footer %}
   <p style="margin: 0 0 8px 0;">
     {% blocktranslate trimmed %}
-      You received this because a task was assigned to you on {{ server_url }}.
+      You received this because you are the assignee of an epic with no recent
+      activity on {{ server_url }}.
     {% endblocktranslate %}
   </p>
   <p style="margin: 0;">

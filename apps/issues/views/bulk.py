@@ -7,6 +7,7 @@ from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 from django.views.generic import View
 
+from apps.issues.activity import epic_ids_in, record_activity_for_issues
 from apps.issues.cascade import build_cascade_oob_response_bulk
 from apps.issues.forms import WorkspaceBulkActionForm, WorkspaceBulkAssigneeForm, WorkspaceBulkMilestoneForm
 from apps.issues.helpers import (
@@ -411,6 +412,13 @@ class WorkspaceIssueBulkStatusView(WorkspaceBulkActionMixin, LoginAndWorkspaceRe
         self._cascade_objects = objects
 
         updated_count = selected_qs.update(status=self.status)
+        # queryset.update() bypasses save() and signals, so apps.issues.signals
+        # never sees this edit — record Epic activity explicitly.
+        record_activity_for_issues(objects)
+        # Any Epics in the selection just changed status, so their inactivity
+        # clocks need realigning (finished ones cleared, reopened ones restarted).
+        # Most selections contain no Epics at all, and that case costs no query.
+        BaseIssue.objects.sync_inactivity_clock_for_status(epic_ids_in(objects))
         AuditLog.objects.bulk_create_for(
             objects, field_name="status", old_values=old_values, new_display=new_display, actor=self.request.user
         )
@@ -453,6 +461,7 @@ class WorkspaceIssueBulkPriorityView(WorkspaceBulkActionMixin, LoginAndWorkspace
         for model_class in (Epic, Story, Bug, Chore):
             updated_count += model_class.objects.filter(pk__in=selected_pks).update(priority=self.priority)
 
+        record_activity_for_issues(objects)
         AuditLog.objects.bulk_create_for(
             objects, field_name="priority", old_values=old_values, new_display=new_display, actor=self.request.user
         )
@@ -487,16 +496,21 @@ class WorkspaceIssueBulkPointsView(WorkspaceBulkActionMixin, LoginAndWorkspaceRe
 
     def perform_action(self):
         selected_qs = self.get_selected_queryset().select_related("polymorphic_ctype")
+        # Materialised once: the rows are needed for old_values, the audit log and
+        # the Epic activity record, and re-evaluating after update() would read
+        # back the new values.
+        objects = list(selected_qs)
         old_values = {
-            obj.pk: str(obj.estimated_points) if obj.estimated_points is not None else "" for obj in selected_qs
+            obj.pk: str(obj.estimated_points) if obj.estimated_points is not None else "" for obj in objects
         }
         new_display = str(self.points)
 
         # estimated_points lives on BaseIssue, so a single update covers all subtypes
         updated_count = selected_qs.update(estimated_points=self.points)
 
+        record_activity_for_issues(objects)
         AuditLog.objects.bulk_create_for(
-            selected_qs,
+            objects,
             field_name="estimated_points",
             old_values=old_values,
             new_display=new_display,
@@ -526,6 +540,7 @@ class WorkspaceIssueBulkRemoveFromSprintView(WorkspaceBulkActionMixin, LoginAndW
             all_old_values.update({obj.pk: str(obj.sprint) for obj in objects})
             removed_count += qs.update(sprint=None)
 
+        record_activity_for_issues(all_objects)
         AuditLog.objects.bulk_create_for(
             all_objects, field_name="sprint", old_values=all_old_values, new_display=None, actor=self.request.user
         )
@@ -574,6 +589,7 @@ class WorkspaceIssueBulkAddToSprintView(WorkspaceBulkActionMixin, LoginAndWorksp
             all_old_values.update({obj.pk: str(obj.sprint) if obj.sprint else None for obj in objects})
             updated_count += qs.update(sprint=self.sprint)
 
+        record_activity_for_issues(all_objects)
         AuditLog.objects.bulk_create_for(
             all_objects,
             field_name="sprint",
@@ -610,6 +626,7 @@ class WorkspaceIssueBulkAssigneeView(WorkspaceBulkActionMixin, LoginAndWorkspace
         new_display = assignee.get_display_name() if assignee else None
 
         updated_count = selected_qs.update(assignee=assignee)
+        record_activity_for_issues(objects)
         AuditLog.objects.bulk_create_for(
             objects, field_name="assignee", old_values=old_values, new_display=new_display, actor=self.request.user
         )

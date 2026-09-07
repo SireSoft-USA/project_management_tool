@@ -1,0 +1,20 @@
+{% load i18n %}{% blocktranslate trimmed with days=inactive_days %}
+No stories have been added to this epic, and no work has been done on its existing stories, for {{ days }} days.
+{% endblocktranslate %}
+
+{{ project.name }} · {{ epic.key }}
+{{ epic.title }}
+
+{% translate "Assigned to" %}: {{ recipient_name }}
+{% translate "Status" %}: {{ epic.get_status_display }}
+{% translate "Priority" %}: {{ epic.get_priority_display }}
+{% translate "Last activity" %}: {{ last_activity_at|date:"j M Y" }}{% if epic.due_date %}
+{% translate "Due" %}: {{ epic.due_date }}{% endif %}
+
+{% translate "View epic" %}: {{ epic_url }}
+
+--
+{% blocktranslate trimmed %}
+You received this because you are the assignee of an epic with no recent activity on {{ server_url }}.
+{% endblocktranslate %}
+{% translate "Unsubscribe" %}: {{ unsubscribe_url }}

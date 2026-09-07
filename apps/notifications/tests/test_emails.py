@@ -9,7 +9,7 @@ from django.contrib.sites.models import Site
 from django.core import mail
 from django.test import TestCase, override_settings
 
-from apps.notifications.emails import send_notification
+from apps.notifications.emails import build_logo_url, send_notification
 from apps.notifications.models import NotificationKind, NotificationPreference
 from apps.users.factories import UserFactory
 from apps.workspaces.factories import WorkspaceFactory
@@ -169,6 +169,63 @@ class SendNotificationContentTests(TestCase):
         self.assertIn(
             "http://10.0.2.11:8000/notifications/unsubscribe/", self.message.extra_headers["List-Unsubscribe"]
         )
+
+    def test_html_part_contains_an_absolute_logo_url(self):
+        """Mail clients fetch images over the open internet; a relative or
+        localhost-only URL would 404 in every real inbox."""
+        html = self._html()
+        self.assertIn('src="http://10.0.2.11:8000/static/images/header-logo2.png"', html)
+
+    def test_logo_img_has_alt_text(self):
+        """If image loading is blocked (the default in most mail clients),
+        the alt text must still name the site instead of showing nothing."""
+        html = self._html()
+        self.assertIn('alt="Siresoft"', html)
+
+    def test_header_shows_the_product_name_beside_the_logo(self):
+        html = self._html()
+        self.assertIn("Siresoft Project Management Tool", html)
+
+    def test_header_does_not_leak_template_comment_text(self):
+        """Regression test: a {# #} Django comment spanning multiple lines does
+        not get parsed as a comment — it used to render as literal visible text
+        in the header. The header must only ever use {% comment %}...{% endcomment %}
+        for multi-line notes, which this asserts never leaks into output."""
+        html = self._html()
+        for leaked_word in ("wordmark", "masthead", "premium", "crowding"):
+            self.assertNotIn(leaked_word, html)
+
+
+class BuildLogoUrlTests(TestCase):
+    """build_logo_url() — the helper every email context gets it from."""
+
+    def setUp(self):
+        Site.objects.update_or_create(pk=settings.SITE_ID, defaults={"domain": "10.0.2.11:8000", "name": "Siresoft"})
+        Site.objects.clear_cache()
+        self.addCleanup(Site.objects.clear_cache)
+
+    def test_returns_an_absolute_url(self):
+        url = build_logo_url()
+        self.assertTrue(url.startswith("http://10.0.2.11:8000/"))
+
+    def test_is_not_a_relative_path(self):
+        url = build_logo_url()
+        self.assertFalse(url.startswith("/static/"))
+
+    def test_does_not_hardcode_localhost(self):
+        """The domain must come from the configured Site, not a dev-only default."""
+        Site.objects.update_or_create(pk=settings.SITE_ID, defaults={"domain": "app.matorral.dev"})
+        Site.objects.clear_cache()
+        url = build_logo_url()
+        self.assertIn("app.matorral.dev", url)
+        self.assertNotIn("localhost", url)
+
+    def test_adds_no_extra_query_beyond_the_cached_site_lookup(self):
+        """Site.objects.get_current() is cached process-wide after the first
+        call, so a second call must add zero additional queries."""
+        build_logo_url()  # warm the Site cache
+        with self.assertNumQueries(0):
+            build_logo_url()
 
 
 class SendNotificationFailureTests(TestCase):

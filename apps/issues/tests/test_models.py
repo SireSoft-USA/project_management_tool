@@ -1,7 +1,9 @@
 from django.core.exceptions import ValidationError
 from django.test import TestCase
+from django.utils import timezone
 
 from apps.issues.factories import BugFactory, ChoreFactory, EpicFactory, MilestoneFactory, StoryFactory
+from apps.issues.activity import EPIC_INACTIVITY_ALERT_AFTER
 from apps.issues.models import BaseIssue, Bug, Chore, Epic, IssueStatus, Milestone, Story
 from apps.projects.factories import ProjectFactory
 
@@ -216,6 +218,139 @@ class EpicMilestoneRelationshipTest(TestCase):
 
         with self.assertRaises(ValidationError):
             story.add_child(instance=epic)
+
+
+class EpicInactivityTrackingDefaultsTest(TestCase):
+    """Tests for Epic.last_activity_at / inactivity_alert_due_at defaults on creation.
+
+    These fields are the "sticker" the inactivity scheduler reads later (Step 8+):
+    a freshly created Epic must start with a real timestamp (never NULL, since the
+    field is non-nullable) and, for the common case of an active Epic, a due date
+    exactly one grace period in the future — not immediately eligible for an alert.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.project = ProjectFactory()
+
+    def test_new_active_epic_gets_last_activity_at_set(self):
+        epic = EpicFactory(project=self.project)
+        self.assertIsNotNone(epic.last_activity_at)
+
+    def test_new_active_epic_gets_a_future_due_date(self):
+        """A brand-new Epic isn't immediately stale — it gets the full grace period."""
+        before = timezone.now()
+        epic = EpicFactory(project=self.project)
+        after = timezone.now()
+
+        self.assertIsNotNone(epic.inactivity_alert_due_at)
+        self.assertGreaterEqual(epic.inactivity_alert_due_at, before + EPIC_INACTIVITY_ALERT_AFTER)
+        self.assertLessEqual(epic.inactivity_alert_due_at, after + EPIC_INACTIVITY_ALERT_AFTER)
+
+    def test_epic_created_already_done_has_no_pending_alert(self):
+        """An Epic created directly into a terminal status (e.g. via type
+        promotion) must never carry a due date — there's nothing to alert about
+        on work that's already finished."""
+        epic = EpicFactory(project=self.project, status=IssueStatus.DONE)
+        self.assertIsNone(epic.inactivity_alert_due_at)
+
+    def test_epic_created_already_wont_do_has_no_pending_alert(self):
+        epic = EpicFactory(project=self.project, status=IssueStatus.WONT_DO)
+        self.assertIsNone(epic.inactivity_alert_due_at)
+
+    def test_epic_created_already_archived_has_no_pending_alert(self):
+        epic = EpicFactory(project=self.project, status=IssueStatus.ARCHIVED)
+        self.assertIsNone(epic.inactivity_alert_due_at)
+
+    def test_epic_created_in_progress_still_gets_a_pending_alert(self):
+        """Only terminal statuses are exempt — an active-but-not-draft Epic still
+        gets the normal grace period, not treated as already finished."""
+        epic = EpicFactory(project=self.project, status=IssueStatus.IN_PROGRESS)
+        self.assertIsNotNone(epic.inactivity_alert_due_at)
+
+    def test_saving_an_existing_epic_does_not_reset_last_activity_at(self):
+        """The terminal-status-at-creation guard in Epic.save() must only ever
+        apply to brand-new rows (pk is None) — editing an existing active Epic's
+        unrelated fields must not silently wipe out its already-tracked activity."""
+        epic = EpicFactory(project=self.project)
+        original_activity = epic.last_activity_at
+        original_due_at = epic.inactivity_alert_due_at
+
+        epic.title = "Renamed"
+        epic.save()
+
+        self.assertEqual(original_activity, epic.last_activity_at)
+        self.assertEqual(original_due_at, epic.inactivity_alert_due_at)
+
+    def test_marking_an_epic_done_clears_the_pending_alert(self):
+        """Finished work is never nagged about."""
+        epic = EpicFactory(project=self.project)
+        self.assertIsNotNone(epic.inactivity_alert_due_at)
+
+        epic.status = IssueStatus.DONE
+        epic.save()
+
+        epic.refresh_from_db()
+        self.assertIsNone(epic.inactivity_alert_due_at)
+
+    def test_marking_an_epic_wont_do_clears_the_pending_alert(self):
+        epic = EpicFactory(project=self.project)
+
+        epic.status = IssueStatus.WONT_DO
+        epic.save()
+
+        epic.refresh_from_db()
+        self.assertIsNone(epic.inactivity_alert_due_at)
+
+    def test_archiving_an_epic_clears_the_pending_alert(self):
+        epic = EpicFactory(project=self.project)
+
+        epic.status = IssueStatus.ARCHIVED
+        epic.save()
+
+        epic.refresh_from_db()
+        self.assertIsNone(epic.inactivity_alert_due_at)
+
+    def test_clearing_works_when_saving_with_update_fields(self):
+        """Cascade and the status helper save with update_fields=['status', ...];
+        the clock adjustment must not be silently dropped by that."""
+        epic = EpicFactory(project=self.project)
+
+        epic.status = IssueStatus.DONE
+        epic.save(update_fields=["status", "updated_at"])
+
+        epic.refresh_from_db()
+        self.assertIsNone(epic.inactivity_alert_due_at)
+
+    def test_reopening_a_done_epic_starts_a_fresh_grace_period(self):
+        """An Epic that sat Done for months must not fire an alert the instant it
+        is picked back up — it gets a full new countdown."""
+        epic = EpicFactory(project=self.project)
+        epic.status = IssueStatus.DONE
+        epic.save()
+        epic.refresh_from_db()
+        self.assertIsNone(epic.inactivity_alert_due_at)
+
+        before = timezone.now()
+        epic.status = IssueStatus.IN_PROGRESS
+        epic.save()
+
+        epic.refresh_from_db()
+        self.assertIsNotNone(epic.inactivity_alert_due_at)
+        self.assertGreaterEqual(epic.inactivity_alert_due_at, before + EPIC_INACTIVITY_ALERT_AFTER)
+
+    def test_saving_an_active_epic_does_not_extend_an_existing_clock(self):
+        """Only a status transition adjusts the clock. Editing an active Epic's
+        other fields must leave its countdown exactly where it was, or renaming
+        an Epic daily would keep it alive forever."""
+        epic = EpicFactory(project=self.project)
+        due_at_before = epic.inactivity_alert_due_at
+
+        epic.title = "Renamed"
+        epic.save()
+
+        epic.refresh_from_db()
+        self.assertEqual(due_at_before, epic.inactivity_alert_due_at)
 
 
 class IssueHierarchyValidationTest(TestCase):

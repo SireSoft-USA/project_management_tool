@@ -16,6 +16,7 @@ from django.db import transaction
 from apps.notifications.tasks import (
     send_assignment_digest_email,
     send_assignment_email,
+    send_epic_inactivity_email,
     send_membership_email,
 )
 from apps.workspaces.roles import is_member
@@ -86,6 +87,38 @@ def notify_member_added(workspace, *, member, actor=None) -> bool:
         return False
 
     _dispatch(send_membership_email, workspace.pk, member.pk, actor.pk if actor else None)
+    return True
+
+
+def notify_epic_inactivity(epic, *, inactive_days: int) -> bool:
+    """Queue a "this epic has gone quiet" email to its assignee.
+
+    Returns True if an email was queued. Skips silently when:
+      * the epic has no assignee — there is no natural recipient for "your epic
+        went stale", so the alert is dropped rather than sent to someone arbitrary
+      * the assignee is no longer a member of the epic's workspace
+
+    Unlike the assignment notifications there is no actor and no self-action to
+    guard against: the scheduler raises this, not a person.
+
+    The caller must already have claimed the alert
+    (Epic.objects.claim_inactivity_alert). This function decides whether the
+    claimed alert is worth emailing, not whether it is safe to send twice.
+    """
+    if epic.assignee_id is None:
+        logger.debug("Epic inactivity notification skipped: epic %s has no assignee", epic.pk)
+        return False
+
+    workspace = epic.project.workspace
+    if not is_member(epic.assignee, workspace):
+        logger.info(
+            "Epic inactivity notification skipped: user %s is not a member of workspace %s",
+            epic.assignee_id,
+            workspace.pk,
+        )
+        return False
+
+    _dispatch(send_epic_inactivity_email, epic.pk, epic.assignee_id, inactive_days)
     return True
 
 

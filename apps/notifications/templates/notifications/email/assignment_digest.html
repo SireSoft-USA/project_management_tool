@@ -20,12 +20,16 @@
     {% endblocktranslate %}
   {% endif %}
 
+  <div style="font-size: 13px; color: #6b7280; margin: 8px 0 4px;">
+    {% translate "Assigned to" %}: {{ recipient_name }}
+  </div>
+
   <table border="0" cellpadding="0" cellspacing="0" width="100%" style="margin: 20px 0;">
     {% for row in issues %}
       <tr>
-        <td style="padding: 8px 0 8px 16px; border-left: 3px solid #588157;">
+        <td style="padding: 8px 0 8px 16px; border-left: 3px solid #1a7be4;">
           <div style="font-size: 13px; color: #6b7280;">{{ row.issue.key }}</div>
-          <a href="{{ row.url }}" style="font-size: 16px; font-weight: 600; color: #344e41; text-decoration: none;">
+          <a href="{{ row.url }}" style="font-size: 16px; font-weight: 600; color: #04306d; text-decoration: none;">
             {{ row.issue.title }}
           </a>
         </td>
@@ -44,6 +48,6 @@
     {% endblocktranslate %}
   </p>
   <p style="margin: 0;">
-    <a href="{{ unsubscribe_url }}" style="color: #3f5c0c;">{% translate "Unsubscribe from these emails" %}</a>
+    <a href="{{ unsubscribe_url }}" style="color: #04306d;">{% translate "Unsubscribe from these emails" %}</a>
   </p>
 {% endblock %}

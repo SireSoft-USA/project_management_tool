@@ -4,8 +4,10 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.urls import reverse
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from apps.issues.activity import EPIC_INACTIVITY_ALERT_AFTER
 from apps.issues.managers import IssueManager, KeyNumber
 from apps.utils.progress import build_progress_dict
 
@@ -39,6 +41,15 @@ STATUS_CATEGORIES = {
     IssueStatus.WONT_DO: "done",
     IssueStatus.ARCHIVED: "done",
 }
+
+
+def _default_inactivity_alert_due_at():
+    """Default for Epic.inactivity_alert_due_at on creation: now + the grace period.
+
+    A plain module-level function (not a lambda) so Django migrations can
+    serialize it by reference instead of failing to freeze an anonymous callable.
+    """
+    return timezone.now() + EPIC_INACTIVITY_ALERT_AFTER
 
 
 class IssuePriority(models.TextChoices):
@@ -385,6 +396,30 @@ class Epic(BaseIssue):
     Epics can be root-level or children of a Milestone.
     """
 
+    # Bumped incrementally whenever a Story is created or edited under this Epic
+    # (see apps.issues.signals and the bulk Story views) — never recalculated by
+    # scanning Stories. Deliberately excluded from @auditlog include_fields above:
+    # it changes on every Story edit and is internal bookkeeping, not a user-facing
+    # edit worth an audit trail entry.
+    last_activity_at = models.DateTimeField(
+        _("Last Activity At"),
+        default=timezone.now,
+        help_text=_("When a Story was last added to or updated under this epic."),
+    )
+    # The next point in time this Epic becomes eligible for an inactivity alert.
+    # NULL means no alert is pending (either the Epic is not active, or one was
+    # already sent for the current inactivity period). Indexed because the 7-day
+    # scheduler's entire query is `WHERE inactivity_alert_due_at <= now()` — this
+    # is the one column that must stay fast to scan as the table grows.
+    inactivity_alert_due_at = models.DateTimeField(
+        _("Inactivity Alert Due At"),
+        null=True,
+        blank=True,
+        db_index=True,
+        default=_default_inactivity_alert_due_at,
+        help_text=_("When this epic becomes eligible for an inactivity alert, or blank if none is pending."),
+    )
+
     class Meta:
         verbose_name = _("Epic")
         verbose_name_plural = _("Epics")
@@ -394,6 +429,43 @@ class Epic(BaseIssue):
         parent = self.get_parent()
         if parent is not None and not isinstance(parent, Milestone):
             raise ValidationError(_("Epics can only be children of Milestones."))
+
+    def is_finished(self) -> bool:
+        """Whether this Epic is in a terminal status (done / won't do / archived)."""
+        return STATUS_CATEGORIES.get(self.status) == "done"
+
+    def apply_inactivity_clock_for_status(self) -> None:
+        """Align the inactivity clock with this Epic's current status.
+
+        Finished work is never nagged about, so a terminal Epic carries no
+        pending alert. Reopening one starts a fresh grace period rather than
+        resuming an old, possibly long-expired countdown — an Epic that sat Done
+        for months should not fire an alert the moment it is picked back up.
+
+        Idempotent, so the many paths that save an Epic can call it freely.
+        """
+        if self.is_finished():
+            self.inactivity_alert_due_at = None
+        elif self.inactivity_alert_due_at is None:
+            # Active again (or never had a clock) — start a full grace period.
+            self.inactivity_alert_due_at = _default_inactivity_alert_due_at()
+
+    def save(self, *args, **kwargs):
+        # Covers every path that goes through save(): creation into a terminal
+        # status (e.g. the type promotion service), the update form, and the three
+        # inline-edit views. Bulk and cascade paths use queryset.update(), which
+        # never reaches here — those call
+        # IssueManager.sync_inactivity_clock_for_status() explicitly.
+        self.apply_inactivity_clock_for_status()
+
+        # save(update_fields=[...]) is used by cascade and the status transition
+        # helper; without adding the field the adjustment above would be computed
+        # and then silently dropped.
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None and "status" in update_fields:
+            kwargs["update_fields"] = {*update_fields, "inactivity_alert_due_at"}
+
+        super().save(*args, **kwargs)
 
 
 class WorkItemMixin(models.Model):

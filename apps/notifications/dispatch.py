@@ -15,6 +15,7 @@ from matorral.context_processors import get_root
 TEMPLATE_ASSIGNMENT = "notifications/email/assignment"
 TEMPLATE_ASSIGNMENT_DIGEST = "notifications/email/assignment_digest"
 TEMPLATE_MEMBERSHIP = "notifications/email/membership"
+TEMPLATE_EPIC_INACTIVITY = "notifications/email/epic_inactivity"
 
 
 def build_assignment_message(*, issue, recipient, actor=None) -> dict:
@@ -29,6 +30,7 @@ def build_assignment_message(*, issue, recipient, actor=None) -> dict:
             "issue": issue,
             "issue_url": build_issue_url(issue),
             "recipient": recipient,
+            "recipient_name": recipient.get_display_name(),
             "actor": actor,
             "actor_name": actor.get_display_name() if actor else None,
             "project": issue.project,
@@ -50,6 +52,7 @@ def build_assignment_digest_message(*, issues, recipient, actor=None) -> dict:
             "issues": [{"issue": issue, "url": build_issue_url(issue)} for issue in issues],
             "count": count,
             "recipient": recipient,
+            "recipient_name": recipient.get_display_name(),
             "actor": actor,
             "actor_name": actor.get_display_name() if actor else None,
             "workspace": workspace,
@@ -71,5 +74,33 @@ def build_membership_message(*, workspace, recipient, actor=None) -> dict:
             "recipient": recipient,
             "actor": actor,
             "actor_name": actor.get_display_name() if actor else None,
+        },
+    }
+
+
+def build_epic_inactivity_message(*, epic, recipient, inactive_days: int) -> dict:
+    """Build the payload for "this epic has had no story activity for a week".
+
+    Unlike the assignment and membership messages there is no actor: nobody
+    performed an action, the alert is raised by the scheduler noticing an absence
+    of one. The email therefore says what has *not* happened and links straight to
+    the epic so the recipient can act.
+    """
+    return {
+        "recipient": recipient,
+        "kind": NotificationKind.EPIC_INACTIVITY,
+        # The key is in the subject so replies and inbox search stay useful, and
+        # so repeated alerts about different epics do not look identical.
+        "subject": _("[%(key)s] No activity on %(title)s for %(days)d days")
+        % {"key": epic.key, "title": epic.title, "days": inactive_days},
+        "template": TEMPLATE_EPIC_INACTIVITY,
+        "context": {
+            "epic": epic,
+            "epic_url": build_issue_url(epic),
+            "recipient": recipient,
+            "recipient_name": recipient.get_display_name(),
+            "project": epic.project,
+            "inactive_days": inactive_days,
+            "last_activity_at": epic.last_activity_at,
         },
     }

@@ -12,6 +12,7 @@ from django.conf import settings
 from django.contrib.sites.models import Site
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
+from django.templatetags.static import static
 from django.urls import reverse
 
 from apps.notifications.models import NotificationKind, NotificationPreference
@@ -103,6 +104,7 @@ def _build_context(context: dict, preference: NotificationPreference) -> dict:
         "current_site": Site.objects.get_current(),
         "server_url": server_url,
         "unsubscribe_url": f"{server_url}{unsubscribe_path}",
+        "logo_url": build_logo_url(),
     }
 
 
@@ -154,10 +156,28 @@ def build_issue_url(issue) -> str:
     return f"{get_root()}{issue.get_absolute_url()}"
 
 
+def build_logo_url() -> str:
+    """Return the absolute URL of the SireSoft logo for use in email templates.
+
+    Mail clients fetch images over the open internet, not through this app, so a
+    relative ``/static/...`` path (or a bare localhost one in dev) would 404 in
+    every inbox. ``static()`` resolves the configured staticfiles storage — same
+    file, whatever host actually serves it (Whitenoise locally, a CDN in
+    production) — with no disk read and no query; ``get_root()`` supplies the
+    scheme+domain the same way it already does for issue and workspace links.
+
+    header-logo2.png (not header-logo.png) is the light/white wordmark — the
+    email header background is dark navy, and the dark-text version is
+    unreadable on it.
+    """
+    return f"{get_root()}{static('images/header-logo2.png')}"
+
+
 __all__ = [
     "NotificationKind",
     "NotificationSkipped",
     "build_issue_url",
+    "build_logo_url",
     "copy_recipients",
     "send_notification",
 ]

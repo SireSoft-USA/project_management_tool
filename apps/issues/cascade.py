@@ -13,6 +13,7 @@ from django.http import HttpResponse
 from django.template.loader import render_to_string
 from django.urls import reverse
 
+from apps.issues.activity import epic_ids_in
 from apps.issues.models import BaseIssue, Epic, IssueStatus, Milestone, Subtask
 from apps.projects.models import Project, ProjectStatus
 from apps.utils.models import AuditLog
@@ -467,6 +468,10 @@ def _apply_cascade_down(pks, target_status, model_type, actor):
     old_values = {obj.pk: status_choices.get(obj.status, obj.status) for obj in objects}
     new_display = status_choices.get(target_status, target_status)
     BaseIssue.objects.filter(pk__in=pks).update(status=target_status)
+    # queryset.update() never calls Epic.save(), so any Epics swept up in this
+    # cascade need their inactivity clocks realigned with their new status.
+    # objects is already loaded above, so identifying them costs no query.
+    BaseIssue.objects.sync_inactivity_clock_for_status(epic_ids_in(objects))
     AuditLog.objects.bulk_create_for(
         objects, field_name="status", old_values=old_values, new_display=new_display, actor=actor
     )

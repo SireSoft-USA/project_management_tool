@@ -7,6 +7,7 @@ This {{ type }} was assigned to you.
 {{ project.name }} · {{ issue.key }}
 {{ issue.title }}
 
+{% translate "Assigned to" %}: {{ recipient_name }}
 {% translate "Status" %}: {{ issue.get_status_display }}
 {% translate "Priority" %}: {{ issue.get_priority_display }}{% if issue.due_date %}
 {% translate "Due" %}: {{ issue.due_date }}{% endif %}
