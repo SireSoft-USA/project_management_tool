@@ -12,14 +12,13 @@
    hx-target="#page-content"
    class="is-drawer-close:hidden flex-1 pl-4">
    
-   <div class="p-1.5 rounded-full bg-white/30 inline-flex">
-     <div class="p-1.5 rounded-full bg-white/60 inline-flex">
-       <img 
-         src="{% static 'images/siresoftlogo.png' %}" 
-         alt="Siresoft"
-         class="h-16 w-16 rounded-full object-contain"
-       />
-     </div>
+   {# Wordmark is a 4:1 banner, so it is sized by width and left to keep its aspect ratio. #}
+   <div class="px-3 py-2 rounded-lg bg-white/90 inline-flex">
+     <img
+       src="{% static 'images/header-logo.png' %}"
+       alt="Siresoft"
+       class="h-8 w-auto object-contain"
+     />
    </div>
 
 </a>
