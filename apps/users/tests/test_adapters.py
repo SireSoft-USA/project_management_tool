@@ -66,4 +66,4 @@ class SendMailAddsLogoUrlTests(TestCase):
 
         sent = mail.outbox[-1]
         html_body = sent.alternatives[0][0] if sent.alternatives else sent.body
-        self.assertIn("header-logo2.png", html_body)
+        self.assertIn("cid:siresoft-logo", html_body)

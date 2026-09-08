@@ -30,9 +30,9 @@ class RenderInvitationEmailLogoTests(TestCase):
             invited_by=self.inviter,
         )
 
-    def test_html_body_contains_an_absolute_logo_url(self):
+    def test_html_body_references_the_embedded_logo(self):
         message = render_invitation_email(self.invitation)
-        self.assertIn("http://10.0.2.11:8000/static/images/header-logo2.png", message["html_message"])
+        self.assertIn('src="cid:siresoft-logo"', message["html_message"])
 
     def test_logo_url_is_not_relative(self):
         message = render_invitation_email(self.invitation)

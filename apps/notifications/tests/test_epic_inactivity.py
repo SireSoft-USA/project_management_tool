@@ -180,7 +180,7 @@ class EpicInactivityEmailRenderingTest(TestCase):
         """Phase 3/4 branding — blue palette and the logo — comes for free."""
         html = self._html()
         self.assertIn("#04306d", html)
-        self.assertIn("header-logo2.png", html)
+        self.assertIn("cid:siresoft-logo", html)
 
     def test_includes_an_unsubscribe_link(self):
         preference = NotificationPreference.objects.for_user(self.recipient)

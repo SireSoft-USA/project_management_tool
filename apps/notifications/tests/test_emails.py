@@ -170,11 +170,11 @@ class SendNotificationContentTests(TestCase):
             "http://10.0.2.11:8000/notifications/unsubscribe/", self.message.extra_headers["List-Unsubscribe"]
         )
 
-    def test_html_part_contains_an_absolute_logo_url(self):
-        """Mail clients fetch images over the open internet; a relative or
-        localhost-only URL would 404 in every real inbox."""
+    def test_html_part_references_the_embedded_logo(self):
+        """The logo travels inside the message, so the HTML points at cid:
+        rather than a URL the mail client would have to fetch (and block)."""
         html = self._html()
-        self.assertIn('src="http://10.0.2.11:8000/static/images/header-logo2.png"', html)
+        self.assertIn('src="cid:siresoft-logo"', html)
 
     def test_logo_img_has_alt_text(self):
         """If image loading is blocked (the default in most mail clients),

@@ -7,9 +7,11 @@ this module decides *whether* to send it.
 """
 
 import logging
+from pathlib import Path
 
 from django.conf import settings
 from django.contrib.sites.models import Site
+from django.contrib.staticfiles import finders
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
 from django.templatetags.static import static
@@ -20,6 +22,12 @@ from apps.notifications.models import NotificationKind, NotificationPreference
 from matorral.context_processors import get_root
 
 logger = logging.getLogger(__name__)
+
+# Content-ID for the inline logo. Templates reference it as src="cid:siresoft-logo".
+LOGO_CID = "siresoft-logo"
+
+# Light wordmark: the email header is dark navy, so the dark-text variant is unreadable.
+LOGO_STATIC_PATH = "images/header-logo2.png"
 
 
 class NotificationSkipped(Exception):
@@ -49,16 +57,18 @@ def send_notification(*, recipient, kind: str, subject: str, template: str, cont
         logger.info("Notification skipped (kind=%s, user=%s): %s", kind, getattr(recipient, "pk", None), exc)
         return False
 
-    full_context = _build_context(context, preference)
+    logo = logo_bytes()
+    full_context = _build_context(context, preference, logo)
     text_body = render_to_string(f"{template}.txt", full_context)
     html_body = render_to_string(f"{template}.html", full_context)
 
-    message = EmailMultiAlternatives(
+    message = LogoEmailMessage(
         subject=subject,
         body=text_body,
         from_email=settings.DEFAULT_FROM_EMAIL,
         to=[recipient.email],
         headers=_unsubscribe_headers(full_context["unsubscribe_url"]),
+        logo=logo,
         **copy_recipients(exclude=[recipient.email]),
     )
     message.attach_alternative(html_body, "text/html")
@@ -90,7 +100,7 @@ def _check_guards(recipient, kind: str) -> NotificationPreference:
     return preference
 
 
-def _build_context(context: dict, preference: NotificationPreference) -> dict:
+def _build_context(context: dict, preference: NotificationPreference, logo: bytes | None = None) -> dict:
     """Add the values every notification template needs."""
     server_url = get_root()
     unsubscribe_path = reverse(
@@ -104,7 +114,8 @@ def _build_context(context: dict, preference: NotificationPreference) -> dict:
         "current_site": Site.objects.get_current(),
         "server_url": server_url,
         "unsubscribe_url": f"{server_url}{unsubscribe_path}",
-        "logo_url": build_logo_url(),
+        # logo_cid is only set when the image was actually embedded.
+        **build_logo_context(logo),
     }
 
 
@@ -157,27 +168,90 @@ def build_issue_url(issue) -> str:
 
 
 def build_logo_url() -> str:
-    """Return the absolute URL of the SireSoft logo for use in email templates.
+    """Return the absolute URL of the logo, used as the fallback when it cannot
+    be embedded.
 
-    Mail clients fetch images over the open internet, not through this app, so a
-    relative ``/static/...`` path (or a bare localhost one in dev) would 404 in
-    every inbox. ``static()`` resolves the configured staticfiles storage — same
-    file, whatever host actually serves it (Whitenoise locally, a CDN in
-    production) — with no disk read and no query; ``get_root()`` supplies the
-    scheme+domain the same way it already does for issue and workspace links.
-
-    header-logo2.png (not header-logo.png) is the light/white wordmark — the
-    email header background is dark navy, and the dark-text version is
-    unreadable on it.
+    Linking is a last resort: a remote image has to survive the mail client's
+    remote-image blocking, mixed-content rules when webmail is served over HTTPS,
+    and being reachable from wherever the recipient reads mail. ``attach_logo()``
+    embeds the file instead and is what normally applies.
     """
-    return f"{get_root()}{static('images/header-logo2.png')}"
+    return f"{get_root()}{static(LOGO_STATIC_PATH)}"
+
+
+def logo_bytes() -> bytes | None:
+    """Return the raw logo image, or None when it cannot be read.
+
+    A missing or unreadable logo must never stop a notification going out, so
+    callers treat None as "render the linked fallback instead".
+    """
+    path = finders.find(LOGO_STATIC_PATH)
+    if not path:
+        logger.warning("Email logo %s not found in staticfiles; falling back to a linked image", LOGO_STATIC_PATH)
+        return None
+    try:
+        return Path(path).read_bytes()
+    except OSError:
+        logger.warning("Could not read email logo %s; falling back to a linked image", path, exc_info=True)
+        return None
+
+
+class LogoEmailMessage(EmailMultiAlternatives):
+    """Email whose HTML part carries the logo embedded as an inline image.
+
+    Embedding rather than linking is what makes the logo appear at all in the
+    common case: mail clients block remote images by default, webmail served over
+    HTTPS refuses an http:// image as mixed content, and a private-network host is
+    unreachable from outside. There is nothing to fetch, so none of that applies.
+
+    Django 6 assembles the MIME tree in ``_add_bodies``; adding the image there
+    (rather than as a plain attachment) is what produces the multipart/related
+    structure that Outlook and Roundcube need to resolve a ``cid:`` reference.
+    """
+
+    def __init__(self, *args, logo=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.logo = logo
+
+    def _add_bodies(self, msg):
+        msg = super()._add_bodies(msg)
+        if self.logo:
+            # Attaches to the HTML part specifically, so text-only clients are
+            # unaffected and the image never shows as a separate attachment.
+            html_part = msg.get_payload()[-1] if msg.is_multipart() else msg
+            html_part.add_related(
+                self.logo,
+                maintype="image",
+                subtype="png",
+                cid=f"<{LOGO_CID}>",
+                disposition="inline",
+                filename=Path(LOGO_STATIC_PATH).name,
+            )
+        return msg
+
+
+def build_logo_context(logo: bytes | None) -> dict:
+    """Return the template variables that select embedded vs linked logo.
+
+    ``logo_cid`` is only set when the image is actually embedded, so a failed
+    read degrades to the linked image rather than a broken ``cid:`` reference
+    pointing at nothing.
+    """
+    if logo:
+        return {"logo_cid": LOGO_CID, "logo_url": build_logo_url()}
+    return {"logo_cid": "", "logo_url": build_logo_url()}
 
 
 __all__ = [
+    "LOGO_CID",
+    "LOGO_STATIC_PATH",
+    "LogoEmailMessage",
     "NotificationKind",
     "NotificationSkipped",
     "build_issue_url",
+    "build_logo_context",
     "build_logo_url",
+    "logo_bytes",
     "copy_recipients",
     "send_notification",
 ]

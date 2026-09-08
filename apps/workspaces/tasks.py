@@ -2,9 +2,8 @@ import logging
 from smtplib import SMTPException
 
 from django.apps import apps
-from django.core.mail import EmailMultiAlternatives
 
-from apps.notifications.emails import copy_recipients
+from apps.notifications.emails import LogoEmailMessage, copy_recipients
 from apps.workspaces.demo_data import create_demo_project
 
 from celery import shared_task
@@ -41,11 +40,12 @@ def send_invitation_email(invitation_id: str) -> bool:
         return False
 
     parts = render_invitation_email(invitation)
-    message = EmailMultiAlternatives(
+    message = LogoEmailMessage(
         subject=parts["subject"],
         body=parts["message"],
         from_email=parts["from_email"],
         to=parts["recipient_list"],
+        logo=parts["logo"],
         # Copy the monitoring addresses, same as notification email.
         **copy_recipients(exclude=parts["recipient_list"]),
     )
@@ -65,7 +65,7 @@ def create_demo_project_task(workspace_id: int, user_id: int):
     try:
         workspace = Workspace.objects.get(pk=workspace_id)
         user = User.objects.get(pk=user_id)
-    except (Workspace.DoesNotExist, User.DoesNotExist):
+    except Workspace.DoesNotExist, User.DoesNotExist:
         logger.warning(
             "Workspace %s or user %s not found for demo project creation",
             workspace_id,

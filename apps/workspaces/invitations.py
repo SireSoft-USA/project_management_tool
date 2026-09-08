@@ -6,7 +6,7 @@ from django.db import transaction
 from django.template.loader import render_to_string
 from django.utils.translation import gettext_lazy as _
 
-from apps.notifications.emails import build_logo_url
+from apps.notifications.emails import build_logo_context, logo_bytes
 from apps.notifications.services import notify_member_added
 from apps.users.models import User
 
@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 def render_invitation_email(invitation) -> dict:
     """Build the subject and both body parts for an invitation email."""
     current_site = Site.objects.get_current()
+    logo = logo_bytes()
     email_context = {
         "invitation": invitation,
         "project_name": current_site.name,
@@ -28,7 +29,8 @@ def render_invitation_email(invitation) -> dict:
         "current_site": current_site,
         # Correct scheme for the environment (http locally, https in production).
         "server_url": get_root(),
-        "logo_url": build_logo_url(),
+        # logo_cid is only set when the image was actually embedded.
+        **build_logo_context(logo),
     }
     return {
         "subject": _("You're invited to {}!").format(current_site.name),
@@ -36,6 +38,7 @@ def render_invitation_email(invitation) -> dict:
         "html_message": render_to_string("workspaces/email/invitation.html", context=email_context),
         "recipient_list": [invitation.email],
         "from_email": settings.DEFAULT_FROM_EMAIL,
+        "logo": logo,
     }
 
 
