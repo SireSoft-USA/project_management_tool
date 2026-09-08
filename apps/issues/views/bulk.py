@@ -16,7 +16,7 @@ from apps.issues.helpers import (
     calculate_valid_page,
 )
 from apps.issues.models import BaseIssue, Bug, Chore, Epic, IssuePriority, IssueStatus, Milestone, Story
-from apps.notifications.services import notify_bulk_assignment
+from apps.notifications.services import notify_bulk_assignment, notify_bulk_epic_activity
 from apps.projects.models import Project
 from apps.sprints.models import Sprint
 from apps.utils.filters import count_active_filters, get_status_filter_label, parse_status_filter
@@ -422,6 +422,11 @@ class WorkspaceIssueBulkStatusView(WorkspaceBulkActionMixin, LoginAndWorkspaceRe
         AuditLog.objects.bulk_create_for(
             objects, field_name="status", old_values=old_values, new_display=new_display, actor=self.request.user
         )
+        # objects still hold their pre-update values, which is what makes an exact
+        # old -> new diff possible on a path that never calls save().
+        notify_bulk_epic_activity(
+            objects, field="status", old_values=old_values, new_display=new_display, actor=self.request.user
+        )
 
         messages.success(
             self.request,
@@ -465,6 +470,9 @@ class WorkspaceIssueBulkPriorityView(WorkspaceBulkActionMixin, LoginAndWorkspace
         AuditLog.objects.bulk_create_for(
             objects, field_name="priority", old_values=old_values, new_display=new_display, actor=self.request.user
         )
+        notify_bulk_epic_activity(
+            objects, field="priority", old_values=old_values, new_display=new_display, actor=self.request.user
+        )
 
         messages.success(
             self.request,
@@ -483,7 +491,7 @@ class WorkspaceIssueBulkPointsView(WorkspaceBulkActionMixin, LoginAndWorkspaceRe
         points_str = request.POST.get("points")
         try:
             self.points = int(points_str)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             self.points = None
 
         if self.points not in [choice[0] for choice in POINTS_CHOICES]:
@@ -500,9 +508,7 @@ class WorkspaceIssueBulkPointsView(WorkspaceBulkActionMixin, LoginAndWorkspaceRe
         # the Epic activity record, and re-evaluating after update() would read
         # back the new values.
         objects = list(selected_qs)
-        old_values = {
-            obj.pk: str(obj.estimated_points) if obj.estimated_points is not None else "" for obj in objects
-        }
+        old_values = {obj.pk: str(obj.estimated_points) if obj.estimated_points is not None else "" for obj in objects}
         new_display = str(self.points)
 
         # estimated_points lives on BaseIssue, so a single update covers all subtypes
@@ -512,6 +518,13 @@ class WorkspaceIssueBulkPointsView(WorkspaceBulkActionMixin, LoginAndWorkspaceRe
         AuditLog.objects.bulk_create_for(
             objects,
             field_name="estimated_points",
+            old_values=old_values,
+            new_display=new_display,
+            actor=self.request.user,
+        )
+        notify_bulk_epic_activity(
+            objects,
+            field="estimated_points",
             old_values=old_values,
             new_display=new_display,
             actor=self.request.user,
@@ -637,6 +650,9 @@ class WorkspaceIssueBulkAssigneeView(WorkspaceBulkActionMixin, LoginAndWorkspace
             # changed are passed on, so re-assigning to the same person stays silent.
             newly_assigned = [obj for obj in objects if obj.assignee_id != assignee.pk]
             notify_bulk_assignment(newly_assigned, new_assignee=assignee, actor=self.request.user)
+            notify_bulk_epic_activity(
+                objects, field="assignee", old_values=old_values, new_display=new_display, actor=self.request.user
+            )
 
             messages.success(
                 self.request,

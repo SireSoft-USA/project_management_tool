@@ -16,6 +16,7 @@ TEMPLATE_ASSIGNMENT = "notifications/email/assignment"
 TEMPLATE_ASSIGNMENT_DIGEST = "notifications/email/assignment_digest"
 TEMPLATE_MEMBERSHIP = "notifications/email/membership"
 TEMPLATE_EPIC_INACTIVITY = "notifications/email/epic_inactivity"
+TEMPLATE_EPIC_ACTIVITY = "notifications/email/epic_activity"
 
 
 def build_assignment_message(*, issue, recipient, actor=None) -> dict:
@@ -102,5 +103,46 @@ def build_epic_inactivity_message(*, epic, recipient, inactive_days: int) -> dic
             "project": epic.project,
             "inactive_days": inactive_days,
             "last_activity_at": epic.last_activity_at,
+        },
+    }
+
+
+def build_epic_activity_message(*, issue, epic, changes, recipient, actor=None, created=False) -> dict:
+    """Build the payload for "something happened on an epic you own".
+
+    The change list arrives ready-rendered from apps.issues.changes: the caller
+    resolved each value to display text while the objects were still in memory,
+    before the row was overwritten. Nothing here re-reads the issue to describe
+    what it used to be, because by now that information only exists in ``changes``.
+
+    ``created`` selects between two readings of the same data. A new work item has
+    no previous state, so its fields are listed as they stand; an edit shows each
+    field as old versus new. One template renders both, keyed off this flag.
+    """
+    project = issue.project
+    verb = _("created") if created else _("updated")
+
+    return {
+        "recipient": recipient,
+        "kind": NotificationKind.EPIC_ACTIVITY,
+        # Leads with the work item key, so inbox search and threading work the
+        # same way as the assignment mails, and names the epic for context.
+        "subject": _("[%(key)s] %(title)s %(verb)s in %(epic)s")
+        % {"key": issue.key, "title": issue.title, "verb": verb, "epic": epic.title},
+        "template": TEMPLATE_EPIC_ACTIVITY,
+        "context": {
+            "issue": issue,
+            "issue_url": build_issue_url(issue),
+            "issue_type": issue.get_issue_type_display(),
+            "epic": epic,
+            "epic_url": build_issue_url(epic),
+            "changes": changes,
+            "created": created,
+            "recipient": recipient,
+            "recipient_name": recipient.get_display_name() if recipient else None,
+            "actor": actor,
+            "actor_name": actor.get_display_name() if actor else None,
+            "project": project,
+            "workspace": project.workspace,
         },
     }

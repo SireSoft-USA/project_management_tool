@@ -97,6 +97,43 @@ def record_activity_for_issues(issues) -> int:
     return BaseIssue.objects.record_story_activity_by_parent_path(parent_paths)
 
 
+def parent_epic_of(issue):
+    """Return the Epic a work item sits under, or None.
+
+    Used by the activity-notification path to answer "who owns this Story?".
+
+    Two properties matter here:
+
+    * **No query to find the parent.** The parent's tree path is derived from the
+      child's in pure Python (see ``story_parent_path``), so this costs one
+      indexed lookup rather than treebeard's ``get_parent()`` plus a type check.
+    * **Cannot cross a workspace.** The lookup is constrained to the issue's own
+      project. Tree paths happen to be globally unique today, but that is a
+      property of a single shared tree, not a guarantee — scoping by project
+      means a future change to path allocation cannot turn this into a
+      cross-tenant leak.
+
+    Returns None — meaning "nobody to notify" — when the item is root-level, or
+    when its parent is a Milestone rather than an Epic. A Milestone's path simply
+    does not match the Epic table, so no explicit type check is needed.
+    """
+    from apps.issues.models import Epic  # noqa: PLC0415
+
+    parent_path = story_parent_path(issue)
+    if not parent_path:
+        return None
+
+    project_id = getattr(issue, "project_id", None)
+    if project_id is None:
+        return None
+
+    return (
+        Epic.objects.filter(path=parent_path, project_id=project_id)
+        .select_related("assignee", "project", "project__workspace")
+        .first()
+    )
+
+
 def epic_ids_in(issues) -> list:
     """Return the pks of the Epics in an already-loaded issue list.
 
@@ -115,6 +152,7 @@ def epic_ids_in(issues) -> list:
 __all__ = [
     "EPIC_INACTIVITY_ALERT_AFTER",
     "epic_ids_in",
+    "parent_epic_of",
     "record_activity_for_issues",
     "story_parent_path",
 ]

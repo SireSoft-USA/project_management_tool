@@ -1,0 +1,121 @@
+{% extends "account/email/email_template_base.html" %}
+{% load i18n %}
+
+{% block title %}{% if created %}{% translate "New work on your epic" %}{% else %}{% translate "Work updated on your epic" %}{% endif %}{% endblock %}
+
+{# Shown as the inbox preview line, next to the subject. #}
+{% block preheader %}{{ issue.key }} — {{ issue.title }}{% endblock %}
+
+{% block email_title %}
+  {% if created %}{% translate "A new item was added to your epic" %}{% else %}{% translate "An item in your epic changed" %}{% endif %}
+{% endblock %}
+
+{% block message_body %}
+  {% if created %}
+    {% if actor_name %}
+      {% blocktranslate trimmed with actor=actor_name type=issue_type|lower epic=epic.title %}
+        {{ actor }} added a {{ type }} to {{ epic }}.
+      {% endblocktranslate %}
+    {% else %}
+      {% blocktranslate trimmed with type=issue_type|lower epic=epic.title %}
+        A {{ type }} was added to {{ epic }}.
+      {% endblocktranslate %}
+    {% endif %}
+  {% else %}
+    {% if actor_name %}
+      {% blocktranslate trimmed with actor=actor_name type=issue_type|lower epic=epic.title %}
+        {{ actor }} updated a {{ type }} in {{ epic }}.
+      {% endblocktranslate %}
+    {% else %}
+      {% blocktranslate trimmed with type=issue_type|lower epic=epic.title %}
+        A {{ type }} in {{ epic }} was updated.
+      {% endblocktranslate %}
+    {% endif %}
+  {% endif %}
+
+  <table border="0" cellpadding="0" cellspacing="0" width="100%" style="margin: 20px 0; border-left: 3px solid #1a7be4;">
+    <tr>
+      <td style="padding: 4px 0 4px 16px;">
+        <div style="font-size: 13px; color: #6b7280; margin-bottom: 4px;">
+          {{ project.name }} &middot; {{ issue.key }}
+        </div>
+        <div style="font-size: 18px; font-weight: 600; color: #04306d; line-height: 1.4;">
+          {{ issue.title }}
+        </div>
+        <div style="font-size: 13px; color: #6b7280; margin-top: 8px;">
+          {% translate "Epic" %}: {{ epic.key }} &mdash; {{ epic.title }}
+        </div>
+        {% if actor_name %}
+          <div style="font-size: 13px; color: #6b7280; margin-top: 4px;">
+            {% translate "Changed by" %}: {{ actor_name }}
+          </div>
+        {% endif %}
+      </td>
+    </tr>
+  </table>
+
+  <div style="font-size: 13px; font-weight: 600; color: #04306d; margin: 24px 0 8px;">
+    {% if created %}{% translate "Details" %}{% else %}{% translate "Changes" %}{% endif %}
+  </div>
+
+  {# Each row is one changed field. Values are escaped by Django, so a title
+     containing markup renders as visible text rather than live HTML. #}
+  <table border="0" cellpadding="0" cellspacing="0" width="100%" style="font-size: 14px;">
+    {% for change in changes %}
+      <tr>
+        <td style="padding: 6px 12px 6px 0; color: #6b7280; vertical-align: top; white-space: nowrap;">
+          {{ change.label }}
+        </td>
+        <td style="padding: 6px 0; color: #04306d; word-break: break-word;">
+          {% if created %}
+            {{ change.new_value }}
+          {% else %}
+            <span style="color: #6b7280; text-decoration: line-through;">{{ change.old_value }}</span>
+            <span style="color: #9ca3af;">&nbsp;&rarr;&nbsp;</span>
+            <strong>{{ change.new_value }}</strong>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+  </table>
+{% endblock %}
+
+{% block cta_link %}{{ issue_url }}{% endblock %}
+{% block cta_text %}{% translate "View item" %}{% endblock %}
+
+{% block cta_fallback %}
+  <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #ffffff;">
+    <tr>
+      <td align="center" style="padding: 0 20px 30px;">
+        <div style="max-width: 600px; font-size: 13px; color: #6b7280; word-break: break-all; text-align: center;">
+          {% translate "If the button doesn't work, paste this into your browser:" %}<br>
+          <a href="{{ issue_url }}" style="color: #04306d;">{{ issue_url }}</a><br><br>
+          <a href="{{ epic_url }}" style="color: #04306d;">{% translate "View epic" %}</a>
+        </div>
+      </td>
+    </tr>
+  </table>
+{% endblock %}
+
+{% block footer %}
+  {# No unsubscribe_url means an operator-configured audit address rather than a
+     subscriber: there is no preference row behind it and nothing to unsubscribe. #}
+  {% if unsubscribe_url %}
+    <p style="margin: 0 0 8px 0;">
+      {% blocktranslate trimmed %}
+        You received this because you are the assignee of the epic this work
+        belongs to on {{ server_url }}.
+      {% endblocktranslate %}
+    </p>
+    <p style="margin: 0;">
+      <a href="{{ unsubscribe_url }}" style="color: #04306d;">{% translate "Unsubscribe from these emails" %}</a>
+    </p>
+  {% else %}
+    <p style="margin: 0;">
+      {% blocktranslate trimmed %}
+        You received this because this address is configured to receive epic
+        activity notifications on {{ server_url }}.
+      {% endblocktranslate %}
+    </p>
+  {% endif %}
+{% endblock %}

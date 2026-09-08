@@ -36,6 +36,11 @@ class NotificationPreference(BaseModel):
         default=True,
         help_text=_("Email me when an epic assigned to me has had no story activity for a week."),
     )
+    notify_on_epic_activity = models.BooleanField(
+        _("Notify on epic activity"),
+        default=True,
+        help_text=_("Email me when a story, bug or chore under an epic I own is created or edited."),
+    )
     # Unguessable, per-user, and stable: it goes in the List-Unsubscribe header and
     # the footer link, both of which must work without an authenticated session.
     unsubscribe_token = models.UUIDField(
@@ -64,11 +69,13 @@ class NotificationPreference(BaseModel):
         self.notify_on_assignment = False
         self.notify_on_membership = False
         self.notify_on_epic_inactivity = False
+        self.notify_on_epic_activity = False
         self.save(
             update_fields=[
                 "notify_on_assignment",
                 "notify_on_membership",
                 "notify_on_epic_inactivity",
+                "notify_on_epic_activity",
                 "updated_at",
             ]
         )
@@ -85,6 +92,7 @@ class NotificationKind(models.TextChoices):
     ASSIGNMENT = "assignment", _("Issue assigned to me")
     MEMBERSHIP = "membership", _("Added to a workspace")
     EPIC_INACTIVITY = "epic_inactivity", _("Epic with no recent activity")
+    EPIC_ACTIVITY = "epic_activity", _("Activity on an epic I own")
 
     @staticmethod
     def preference_field(kind: str) -> str:
@@ -98,4 +106,5 @@ _PREFERENCE_FIELDS = {
     NotificationKind.ASSIGNMENT: "notify_on_assignment",
     NotificationKind.MEMBERSHIP: "notify_on_membership",
     NotificationKind.EPIC_INACTIVITY: "notify_on_epic_inactivity",
+    NotificationKind.EPIC_ACTIVITY: "notify_on_epic_activity",
 }

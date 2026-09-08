@@ -13,9 +13,13 @@ import logging
 from django.conf import settings
 from django.db import transaction
 
+from apps.issues.activity import parent_epic_of
+from apps.issues.changes import EMPTY_DISPLAY, FIELD_LABELS
+from apps.notifications.recipients import epic_activity_admin_copies, epic_activity_recipient
 from apps.notifications.tasks import (
     send_assignment_digest_email,
     send_assignment_email,
+    send_epic_activity_email,
     send_epic_inactivity_email,
     send_membership_email,
 )
@@ -120,6 +124,100 @@ def notify_epic_inactivity(epic, *, inactive_days: int) -> bool:
 
     _dispatch(send_epic_inactivity_email, epic.pk, epic.assignee_id, inactive_days)
     return True
+
+
+def notify_epic_activity(issue, *, changes, actor=None, created=False) -> bool:
+    """Queue an "activity on your epic" email for a work item under an Epic.
+
+    Called by the views that create or edit a Story, Bug or Chore, after the
+    change is saved but inside the surrounding transaction. The caller supplies
+    the change list (from apps.issues.changes) because only the caller saw the
+    values before they were overwritten.
+
+    Returns True if an email was queued. Skips silently when:
+      * nothing a person would notice changed — the single most important guard,
+        since an ordinary save() with no edits must not generate mail
+      * the item does not sit under an Epic (root-level, or under a Milestone)
+      * the Epic has no assignee and no admin copy is configured, leaving nobody
+        to tell
+      * the only recipient would be the person who just made the change
+
+    Args:
+        issue: The Story, Bug or Chore that was created or edited.
+        changes: Change dicts from ``changes.diff`` (edit) or ``changes.describe``
+            (creation). Empty means "nothing worth reporting" and stops the send.
+        actor: User who made the change; None for system-driven changes.
+        created: True when the item was just created, which selects the "new item"
+            wording instead of an old/new comparison.
+    """
+    if not changes:
+        # An empty diff is the normal outcome of a save that changed nothing
+        # notifiable. Returning here keeps that path free of further work.
+        return False
+
+    epic = parent_epic_of(issue)
+    if epic is None:
+        logger.debug("Epic activity notification skipped: %s has no parent epic", getattr(issue, "pk", None))
+        return False
+
+    recipient = epic_activity_recipient(epic, actor)
+    if recipient is None and not epic_activity_admin_copies():
+        return False
+
+    _dispatch(
+        send_epic_activity_email,
+        issue.pk,
+        epic.pk,
+        changes,
+        actor.pk if actor else None,
+        created,
+    )
+    return True
+
+
+def notify_bulk_epic_activity(issues, *, field, old_values, new_display, actor=None) -> int:
+    """Queue epic-activity email for issues changed together by one bulk action.
+
+    The bulk views mutate with ``queryset.update()``, which fires no signals and
+    leaves the in-memory objects holding their *previous* values. That is exactly
+    what this needs: each object still knows what the field used to be, and the
+    caller supplies the single new value that was applied to all of them.
+
+    One email per affected issue rather than a digest, because each names a
+    different work item and may reach a different epic assignee. Bulk edits are
+    the noisiest path here, so callers should pass only the rows that actually
+    changed.
+
+    Args:
+        issues: Already-loaded issues, snapshotted before the update.
+        field: Name of the changed field, as used by apps.issues.changes.
+        old_values: Mapping of pk to the previous display value.
+        new_display: The new display value, shared by every issue.
+        actor: User who made the change.
+
+    Returns:
+        How many notifications were queued.
+    """
+    if not issues:
+        return 0
+
+    label = str(FIELD_LABELS.get(field, field))
+    empty = str(EMPTY_DISPLAY)
+    new_text = str(new_display) if new_display not in (None, "") else empty
+
+    queued = 0
+    for issue in issues:
+        old_value = (old_values or {}).get(issue.pk)
+        old_text = str(old_value) if old_value not in (None, "") else empty
+        if old_text == new_text:
+            # Re-applying the value somebody already had is not a change.
+            continue
+
+        changes = [{"field": field, "label": label, "old_value": old_text, "new_value": new_text}]
+        if notify_epic_activity(issue, changes=changes, actor=actor):
+            queued += 1
+
+    return queued
 
 
 def _should_notify_assignment(issue, new_assignee, actor, old_assignee) -> bool:

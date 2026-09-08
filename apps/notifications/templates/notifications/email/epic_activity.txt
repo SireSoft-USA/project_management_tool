@@ -1,0 +1,30 @@
+{% load i18n %}{% if created %}{% if actor_name %}{% blocktranslate trimmed with actor=actor_name type=issue_type|lower epic=epic.title %}
+{{ actor }} added a {{ type }} to {{ epic }}.
+{% endblocktranslate %}{% else %}{% blocktranslate trimmed with type=issue_type|lower epic=epic.title %}
+A {{ type }} was added to {{ epic }}.
+{% endblocktranslate %}{% endif %}{% else %}{% if actor_name %}{% blocktranslate trimmed with actor=actor_name type=issue_type|lower epic=epic.title %}
+{{ actor }} updated a {{ type }} in {{ epic }}.
+{% endblocktranslate %}{% else %}{% blocktranslate trimmed with type=issue_type|lower epic=epic.title %}
+A {{ type }} in {{ epic }} was updated.
+{% endblocktranslate %}{% endif %}{% endif %}
+
+{{ project.name }} · {{ issue.key }}
+{{ issue.title }}
+
+{% translate "Epic" %}: {{ epic.key }} — {{ epic.title }}{% if actor_name %}
+{% translate "Changed by" %}: {{ actor_name }}{% endif %}
+
+{% if created %}{% translate "Details" %}:{% else %}{% translate "Changes" %}:{% endif %}{% for change in changes %}{% if created %}
+  {{ change.label }}: {{ change.new_value }}{% else %}
+  {{ change.label }}: {{ change.old_value }} -> {{ change.new_value }}{% endif %}{% endfor %}
+
+{% translate "View item" %}: {{ issue_url }}
+{% translate "View epic" %}: {{ epic_url }}
+
+--
+{% if unsubscribe_url %}{% blocktranslate trimmed %}
+You received this because you are the assignee of the epic this work belongs to on {{ server_url }}.
+{% endblocktranslate %}
+{% translate "Unsubscribe" %}: {{ unsubscribe_url }}{% else %}{% blocktranslate trimmed %}
+You received this because this address is configured to receive epic activity notifications on {{ server_url }}.
+{% endblocktranslate %}{% endif %}

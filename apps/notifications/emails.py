@@ -34,7 +34,15 @@ class NotificationSkipped(Exception):
     """Raised internally when a guard declines to send. Never propagated to callers."""
 
 
-def send_notification(*, recipient, kind: str, subject: str, template: str, context: dict) -> bool:
+def send_notification(
+    *,
+    recipient,
+    kind: str,
+    subject: str,
+    template: str,
+    context: dict,
+    extra_cc: list[str] | None = None,
+) -> bool:
     """Render and send one notification email.
 
     Args:
@@ -45,6 +53,10 @@ def send_notification(*, recipient, kind: str, subject: str, template: str, cont
             are both rendered so every client gets a readable part.
         context: Template context. ``site``, ``server_url`` and the unsubscribe
             URL are added automatically.
+        extra_cc: Additional addresses to copy on this one message, on top of the
+            site-wide NOTIFICATION_COPY_TO. Used where a notification type has its
+            own audit copy. Deduplicated case-insensitively against the recipient
+            and against the site-wide list, so nobody is addressed twice.
 
     Returns:
         True if the message was handed to the mail backend, False if a guard
@@ -62,6 +74,10 @@ def send_notification(*, recipient, kind: str, subject: str, template: str, cont
     text_body = render_to_string(f"{template}.txt", full_context)
     html_body = render_to_string(f"{template}.html", full_context)
 
+    copies = copy_recipients(exclude=[recipient.email])
+    if extra_cc:
+        copies = _merge_extra_cc(copies, extra_cc, exclude=[recipient.email])
+
     message = LogoEmailMessage(
         subject=subject,
         body=text_body,
@@ -69,7 +85,7 @@ def send_notification(*, recipient, kind: str, subject: str, template: str, cont
         to=[recipient.email],
         headers=_unsubscribe_headers(full_context["unsubscribe_url"]),
         logo=logo,
-        **copy_recipients(exclude=[recipient.email]),
+        **copies,
     )
     message.attach_alternative(html_body, "text/html")
 
@@ -144,6 +160,32 @@ def copy_recipients(*, exclude: list[str] | None = None) -> dict:
     # is the safer default if the setting is mistyped.
     field = "cc" if getattr(settings, "NOTIFICATION_COPY_MODE", "bcc").lower() == "cc" else "bcc"
     return {field: addresses}
+
+
+def _merge_extra_cc(copies: dict, extra_cc: list[str], *, exclude: list[str]) -> dict:
+    """Fold per-message copy addresses into whatever copy_recipients() returned.
+
+    The site-wide copy list may be cc or bcc, or absent entirely. Per-message
+    addresses are added to that same field so one message never carries both a Cc
+    and a Bcc copy of itself; with no site-wide list they default to cc, which is
+    what an explicitly configured audit address is for.
+
+    Addresses already present — as the recipient, or in the site-wide list — are
+    dropped, compared case-insensitively, so nobody receives two copies.
+    """
+    field = next(iter(copies), "cc")
+    existing = list(copies.get(field, []))
+
+    seen = {address.lower() for address in existing}
+    seen.update(address.lower() for address in exclude)
+
+    for address in extra_cc:
+        address = (address or "").strip()
+        if address and address.lower() not in seen:
+            existing.append(address)
+            seen.add(address.lower())
+
+    return {field: existing} if existing else {}
 
 
 def _unsubscribe_headers(unsubscribe_url: str) -> dict:

@@ -28,7 +28,8 @@ from apps.issues.helpers import (
 )
 from apps.issues.models import BaseIssue, Bug, BugSeverity, Epic, IssuePriority, IssueStatus, Subtask
 from apps.issues.services import IssueConversionError, PromotionError, convert_issue_type, promote_to_epic
-from apps.notifications.services import notify_assignment
+from apps.issues.changes import capture, capture_initial, diff
+from apps.notifications.services import notify_assignment, notify_epic_activity
 from apps.projects.models import Project
 from apps.sprints.models import Sprint
 from apps.utils.progress import build_progress_dict
@@ -61,7 +62,7 @@ def _resolve_user(value):
         return value
     try:
         return User.objects.get(pk=value)
-    except (User.DoesNotExist, TypeError, ValueError):
+    except User.DoesNotExist, TypeError, ValueError:
         return None
 
 
@@ -480,6 +481,11 @@ class IssueUpdateView(
         # the raw pk, so resolve it to an instance for comparison.
         old_assignee = _resolve_user(form.initial.get("assignee"))
 
+        # Read from form.initial for the same reason as old_assignee above: by
+        # form_valid, ModelForm has already written the submitted values onto
+        # self.object, so snapshotting the instance would diff it against itself.
+        before = capture_initial(form)
+
         # Handle parent change (move in tree)
         new_parent = form.cleaned_data.get("parent")
         current_parent = self.object.get_parent_issue()
@@ -504,6 +510,7 @@ class IssueUpdateView(
             actor=self.request.user,
             old_assignee=old_assignee,
         )
+        notify_epic_activity(self.object, changes=diff(before, self.object), actor=self.request.user)
 
         messages.success(
             self.request,
@@ -1192,6 +1199,8 @@ class IssueRowInlineEditView(LoginAndWorkspaceRequiredMixin, IssueViewMixin, Vie
             old_status = real_issue.status
             # Captured before the assignment below overwrites it.
             old_assignee = real_issue.assignee
+            # Same reason, for every notifiable field at once.
+            before = capture(real_issue)
 
             # Update issue fields
             real_issue.title = form.cleaned_data["title"]
@@ -1213,6 +1222,7 @@ class IssueRowInlineEditView(LoginAndWorkspaceRequiredMixin, IssueViewMixin, Vie
                 actor=request.user,
                 old_assignee=old_assignee,
             )
+            notify_epic_activity(real_issue, changes=diff(before, real_issue), actor=request.user)
 
             # Return display mode
             response = render(request, display_template, context)
@@ -1404,6 +1414,8 @@ class IssueDetailInlineEditView(LoginAndWorkspaceRequiredMixin, IssueViewMixin, 
             old_status = real_issue.status
             # Captured before the assignment below overwrites it.
             old_assignee = real_issue.assignee
+            # Same reason, for every notifiable field at once.
+            before = capture(real_issue)
 
             # Update issue fields
             real_issue.title = form.cleaned_data["title"]
@@ -1426,6 +1438,7 @@ class IssueDetailInlineEditView(LoginAndWorkspaceRequiredMixin, IssueViewMixin, 
                 actor=request.user,
                 old_assignee=old_assignee,
             )
+            notify_epic_activity(real_issue, changes=diff(before, real_issue), actor=request.user)
 
             # Handle parent change (move in tree)
             new_parent = form.cleaned_data.get("parent")

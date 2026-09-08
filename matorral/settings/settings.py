@@ -383,6 +383,16 @@ NOTIFICATION_BULK_THRESHOLD = env.int("NOTIFICATION_BULK_THRESHOLD", default=10)
 # monitoring or record keeping. Comma-separated; empty disables copying.
 NOTIFICATION_COPY_TO = env.list("NOTIFICATION_COPY_TO", default=[])
 
+# Addresses copied on epic-activity email specifically (story/bug/chore created or
+# edited under an epic). Separate from NOTIFICATION_COPY_TO, which copies *every*
+# notification type — this one is scoped to epic activity, as that feature asks
+# for an admin on the loop for work-item churn and nothing else.
+#
+# Configured rather than hardcoded so staging and local environments do not mail
+# the production admin every time somebody edits a story. Set to an empty value
+# to send to the epic assignee only.
+EPIC_ACTIVITY_ADMIN_CC = env.list("EPIC_ACTIVITY_ADMIN_CC", default=["admin@siresoft.com"])
+
 # How those addresses are copied:
 #   "bcc" (default) — hidden from recipients. Recommended: a CC header exposes the
 #          monitoring address to everyone who receives a notification, and shows up
