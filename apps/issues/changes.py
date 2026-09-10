@@ -28,6 +28,11 @@ re-query users to render "John Smith -> Sarah Khan", and by then the row may hav
 changed again — the email would describe a state that never existed.
 """
 
+import datetime
+
+from django.core.exceptions import FieldDoesNotExist
+from django.db import models
+from django.utils.formats import date_format
 from django.utils.translation import gettext_lazy as _
 
 # Editable fields worth telling somebody about, in the order they appear in the
@@ -67,6 +72,52 @@ EMPTY_DISPLAY = _("Not set")
 MAX_VALUE_LENGTH = 200
 
 
+def _is_date_field(issue, field: str) -> bool:
+    """True when ``field`` is a plain date column on ``issue``'s model.
+
+    Consulted before any string is read as a date, so the coercion below applies
+    only where a date is what the column actually holds. Without this check a
+    story titled "2026-09-15" would be reformatted to "September 15, 2026" —
+    silently rewriting a text field the user typed by hand.
+
+    DateTimeField is excluded: it is a subclass of DateField, and a timestamp
+    rendered as a bare day would drop the time.
+    """
+    try:
+        model_field = issue._meta.get_field(field)
+    except FieldDoesNotExist, AttributeError:
+        return False
+    return isinstance(model_field, models.DateField) and not isinstance(model_field, models.DateTimeField)
+
+
+def _as_date(value):
+    """Coerce an ISO date string to a ``date``, leaving anything else untouched.
+
+    Assigning to a model field does not coerce: ``issue.due_date = "2026-09-15"``
+    stores the *string*, since Django only converts during form validation. That
+    matters because ``capture_initial`` builds its snapshot by assigning
+    ``form.initial`` values onto a throwaway instance.
+
+    Without this, a string on one side and a date on the other would render as
+    "2026-09-15" and "September 15, 2026" — different text for the same day, so
+    a save that changed nothing would report a due date change and email about
+    it. Both sides of every comparison are normalised here so that cannot happen.
+
+    ``form.initial`` currently holds real date objects, so this is a guard on an
+    invariant nothing else enforces rather than a fix for a live bug: one custom
+    form or serializer passing a string would otherwise reintroduce the spam
+    silently.
+    """
+    if isinstance(value, str):
+        try:
+            return datetime.date.fromisoformat(value)
+        except ValueError:
+            # Not an ISO date — a title, a description, a status label. Returned
+            # unchanged so non-date fields are wholly unaffected by this path.
+            return value
+    return value
+
+
 def _display(issue, field: str) -> str:
     """Render one field of ``issue`` as the string a person should read.
 
@@ -83,6 +134,16 @@ def _display(issue, field: str) -> str:
 
     if value is None or value == "":
         return str(EMPTY_DISPLAY)
+
+    if _is_date_field(issue, field):
+        value = _as_date(value)
+
+    # A DateField reaches str() as "2026-09-15". A due date is the one notified
+    # value a person reads as prose rather than data, so it is written the way
+    # they would write it. datetime is a subclass of date and is excluded above,
+    # so a future DateTimeField cannot silently lose its time here.
+    if isinstance(value, datetime.date) and not isinstance(value, datetime.datetime):
+        return date_format(value, "F j, Y")
 
     # User: "John Smith" reads better than the __str__ fallback (an email).
     text = value.get_display_name() if hasattr(value, "get_display_name") else str(value)

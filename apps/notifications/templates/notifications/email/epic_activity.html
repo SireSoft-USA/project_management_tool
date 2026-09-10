@@ -7,11 +7,21 @@
 {% block preheader %}{{ issue.key }} — {{ issue.title }}{% endblock %}
 
 {% block email_title %}
-  {% if created %}{% translate "A new item was added to your epic" %}{% else %}{% translate "An item in your epic changed" %}{% endif %}
+  {% if is_epic_itself %}{% translate "Your epic changed" %}{% elif created %}{% translate "A new item was added to your epic" %}{% else %}{% translate "An item in your epic changed" %}{% endif %}
 {% endblock %}
 
 {% block message_body %}
-  {% if created %}
+  {% if is_epic_itself %}
+    {% if actor_name %}
+      {% blocktranslate trimmed with actor=actor_name epic=epic.title %}
+        {{ actor }} updated the epic {{ epic }}.
+      {% endblocktranslate %}
+    {% else %}
+      {% blocktranslate trimmed with epic=epic.title %}
+        The epic {{ epic }} was updated.
+      {% endblocktranslate %}
+    {% endif %}
+  {% elif created %}
     {% if actor_name %}
       {% blocktranslate trimmed with actor=actor_name type=issue_type|lower epic=epic.title %}
         {{ actor }} added a {{ type }} to {{ epic }}.
@@ -42,9 +52,11 @@
         <div style="font-size: 18px; font-weight: 600; color: #04306d; line-height: 1.4;">
           {{ issue.title }}
         </div>
-        <div style="font-size: 13px; color: #6b7280; margin-top: 8px;">
-          {% translate "Epic" %}: {{ epic.key }} &mdash; {{ epic.title }}
-        </div>
+        {% if not is_epic_itself %}
+          <div style="font-size: 13px; color: #6b7280; margin-top: 8px;">
+            {% translate "Epic" %}: {{ epic.key }} &mdash; {{ epic.title }}
+          </div>
+        {% endif %}
         {% if actor_name %}
           <div style="font-size: 13px; color: #6b7280; margin-top: 4px;">
             {% translate "Changed by" %}: {{ actor_name }}
@@ -80,8 +92,8 @@
   </table>
 {% endblock %}
 
-{% block cta_link %}{{ issue_url }}{% endblock %}
-{% block cta_text %}{% translate "View item" %}{% endblock %}
+{% block cta_link %}{% if is_epic_itself %}{{ epic_url }}{% else %}{{ issue_url }}{% endif %}{% endblock %}
+{% block cta_text %}{% if is_epic_itself %}{% translate "View epic" %}{% else %}{% translate "View item" %}{% endif %}{% endblock %}
 
 {% block cta_fallback %}
   <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #ffffff;">
@@ -89,8 +101,12 @@
       <td align="center" style="padding: 0 20px 30px;">
         <div style="max-width: 600px; font-size: 13px; color: #6b7280; word-break: break-all; text-align: center;">
           {% translate "If the button doesn't work, paste this into your browser:" %}<br>
-          <a href="{{ issue_url }}" style="color: #04306d;">{{ issue_url }}</a><br><br>
-          <a href="{{ epic_url }}" style="color: #04306d;">{% translate "View epic" %}</a>
+          {% if is_epic_itself %}
+            <a href="{{ epic_url }}" style="color: #04306d;">{{ epic_url }}</a>
+          {% else %}
+            <a href="{{ issue_url }}" style="color: #04306d;">{{ issue_url }}</a><br><br>
+            <a href="{{ epic_url }}" style="color: #04306d;">{% translate "View epic" %}</a>
+          {% endif %}
         </div>
       </td>
     </tr>
@@ -102,10 +118,17 @@
      subscriber: there is no preference row behind it and nothing to unsubscribe. #}
   {% if unsubscribe_url %}
     <p style="margin: 0 0 8px 0;">
+      {% if is_epic_itself %}
+      {% blocktranslate trimmed %}
+        You received this because you are the assignee of this epic
+        on {{ server_url }}.
+      {% endblocktranslate %}
+      {% else %}
       {% blocktranslate trimmed %}
         You received this because you are the assignee of the epic this work
         belongs to on {{ server_url }}.
       {% endblocktranslate %}
+      {% endif %}
     </p>
     <p style="margin: 0;">
       <a href="{{ unsubscribe_url }}" style="color: #04306d;">{% translate "Unsubscribe from these emails" %}</a>

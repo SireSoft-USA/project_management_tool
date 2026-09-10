@@ -122,13 +122,27 @@ def build_epic_activity_message(*, issue, epic, changes, recipient, actor=None, 
     project = issue.project
     verb = _("created") if created else _("updated")
 
+    # An edit to the Epic itself passes the same object as both subject and
+    # context. Saying "a epic in Website Redesign" and printing the title twice
+    # would read as a bug, so the template drops the redundant half instead.
+    is_epic_itself = issue.pk == epic.pk
+
+    if is_epic_itself:
+        subject = _("[%(key)s] Epic %(title)s %(verb)s") % {"key": epic.key, "title": epic.title, "verb": verb}
+    else:
+        # Leads with the work item key, so inbox search and threading work the
+        # same way as the assignment mails, and names the epic for context.
+        subject = _("[%(key)s] %(title)s %(verb)s in %(epic)s") % {
+            "key": issue.key,
+            "title": issue.title,
+            "verb": verb,
+            "epic": epic.title,
+        }
+
     return {
         "recipient": recipient,
         "kind": NotificationKind.EPIC_ACTIVITY,
-        # Leads with the work item key, so inbox search and threading work the
-        # same way as the assignment mails, and names the epic for context.
-        "subject": _("[%(key)s] %(title)s %(verb)s in %(epic)s")
-        % {"key": issue.key, "title": issue.title, "verb": verb, "epic": epic.title},
+        "subject": subject,
         "template": TEMPLATE_EPIC_ACTIVITY,
         "context": {
             "issue": issue,
@@ -136,6 +150,7 @@ def build_epic_activity_message(*, issue, epic, changes, recipient, actor=None, 
             "issue_type": issue.get_issue_type_display(),
             "epic": epic,
             "epic_url": build_issue_url(epic),
+            "is_epic_itself": is_epic_itself,
             "changes": changes,
             "created": created,
             "recipient": recipient,

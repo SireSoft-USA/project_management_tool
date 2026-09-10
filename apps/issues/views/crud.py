@@ -29,7 +29,7 @@ from apps.issues.helpers import (
 from apps.issues.models import BaseIssue, Bug, BugSeverity, Epic, IssuePriority, IssueStatus, Subtask
 from apps.issues.services import IssueConversionError, PromotionError, convert_issue_type, promote_to_epic
 from apps.issues.changes import capture, capture_initial, diff
-from apps.notifications.services import notify_assignment, notify_epic_activity
+from apps.notifications.services import notify_assignment, notify_epic_activity, notify_epic_changed
 from apps.projects.models import Project
 from apps.sprints.models import Sprint
 from apps.utils.progress import build_progress_dict
@@ -1305,6 +1305,11 @@ class EpicDetailInlineEditView(LoginAndWorkspaceRequiredMixin, IssueViewMixin, V
 
         if form.is_valid():
             old_status = epic.status
+            old_assignee = epic.assignee
+
+            # Snapshot before the assignments below overwrite the previous values:
+            # once they are gone, no later read can report what the epic used to be.
+            before = capture(epic)
 
             # Update epic fields
             epic.title = form.cleaned_data["title"]
@@ -1314,6 +1319,17 @@ class EpicDetailInlineEditView(LoginAndWorkspaceRequiredMixin, IssueViewMixin, V
             epic.assignee = form.cleaned_data.get("assignee")
             epic.due_date = form.cleaned_data.get("due_date")
             epic.save()
+
+            notify_assignment(
+                epic,
+                new_assignee=epic.assignee,
+                actor=request.user,
+                old_assignee=old_assignee,
+            )
+            # notify_epic_activity would find no parent epic here — an Epic is a
+            # root node — so the edit would tell nobody. This reports the Epic as
+            # its own subject instead.
+            notify_epic_changed(epic, changes=diff(before, epic), actor=request.user)
 
             # Return display mode
             response = render(request, display_template, context)

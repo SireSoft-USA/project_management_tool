@@ -175,6 +175,49 @@ def notify_epic_activity(issue, *, changes, actor=None, created=False) -> bool:
     return True
 
 
+def notify_epic_changed(epic, *, changes, actor=None) -> bool:
+    """Queue an "your epic changed" email for an edit to the Epic itself.
+
+    Separate from ``notify_epic_activity`` because that one answers "which Epic
+    does this work item belong to?", and an Epic belongs to none: it is a root
+    node, so the parent lookup returns None and the notification is dropped. An
+    edit to an Epic's own title, status or due date would otherwise tell nobody,
+    even though an epic's deadline is usually the most consequential one in the
+    project.
+
+    The epic stands as both the subject of the change and its own context, which
+    lets this reuse the existing task, template, recipient rules and unsubscribe
+    link rather than adding a parallel path.
+
+    Returns True if an email was queued. Skips silently when:
+      * nothing a person would notice changed
+      * the epic is unassigned, or its assignee made the change themselves, or
+        they have left the workspace — all decided by the same recipient rules
+        the work-item path uses, so the two cannot drift apart
+
+    Args:
+        epic: The Epic that was edited.
+        changes: Change dicts from ``changes.diff``. Empty stops the send.
+        actor: User who made the change; None for system-driven changes.
+    """
+    if not changes:
+        return False
+
+    recipient = epic_activity_recipient(epic, actor)
+    if recipient is None and not epic_activity_admin_copies():
+        return False
+
+    _dispatch(
+        send_epic_activity_email,
+        epic.pk,
+        epic.pk,
+        changes,
+        actor.pk if actor else None,
+        False,
+    )
+    return True
+
+
 def notify_bulk_epic_activity(issues, *, field, old_values, new_display, actor=None) -> int:
     """Queue epic-activity email for issues changed together by one bulk action.
 
