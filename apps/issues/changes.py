@@ -60,6 +60,11 @@ FIELD_LABELS = {
     "estimated_points": _("Points"),
     "severity": _("Severity"),
     "sprint": _("Sprint"),
+    # Not a model field, so it is absent from NOTIFIED_FIELDS and never produced
+    # by diff(). An assignment change is derived by comparing two sets of rows
+    # (see apps.issues.assignments), and describe_assignment_change() renders it
+    # into this same shape so one email template handles both.
+    "assignees": _("Assignees"),
 }
 
 # Shown wherever a field had (or now has) no value. "None" is a Python artefact;
@@ -301,6 +306,54 @@ def describe(issue) -> list[dict]:
     return described
 
 
+def describe_assignment_change(diff) -> list[dict]:
+    """Render an AssignmentDiff as a change entry, or [] when nothing changed.
+
+    Assignment is a set, not a value, so "old -> new" reads poorly: listing the
+    whole membership twice makes the reader find the difference themselves. What
+    changed is named directly instead - "Added Khadija; Removed Awais" - which is
+    the one line a recipient actually needs.
+
+    Returned in the same shape as ``diff()`` so the existing email template
+    renders it with no special case. ``old_value`` is None, which the template
+    already treats as "no previous value to show", as it does for a newly created
+    work item.
+
+    Args:
+        diff: An apps.issues.assignments.AssignmentDiff.
+
+    Returns:
+        A single-entry list, or [] when the edit added and removed nobody - so a
+        save that re-submits the same people generates no email.
+    """
+    if not diff:
+        return []
+
+    parts = []
+    if diff.added:
+        names = ", ".join(_display_name(user) for user in diff.added)
+        parts.append(str(_("Added %(names)s") % {"names": names}))
+    if diff.removed:
+        names = ", ".join(_display_name(user) for user in diff.removed)
+        parts.append(str(_("Removed %(names)s") % {"names": names}))
+
+    return [
+        {
+            "field": "assignees",
+            "label": str(FIELD_LABELS["assignees"]),
+            "old_value": None,
+            "new_value": _shorten("; ".join(parts)),
+        }
+    ]
+
+
+def _display_name(user) -> str:
+    """A person's name as an email should show it."""
+    if hasattr(user, "get_display_name"):
+        return user.get_display_name()
+    return str(user)
+
+
 __all__ = [
     "EMPTY_DISPLAY",
     "FIELD_LABELS",
@@ -309,5 +362,6 @@ __all__ = [
     "capture",
     "capture_initial",
     "describe",
+    "describe_assignment_change",
     "diff",
 ]

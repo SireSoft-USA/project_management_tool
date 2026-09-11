@@ -38,8 +38,8 @@
       </select>
     </div>
     <div>
-      <h3 class="font-semibold mb-1 text-sm text-gray-500">{% translate "Assignee" %}</h3>
-      {% include "includes/user_combobox.html" with combobox_name="assignee" combobox_members=workspace_members combobox_selected_id=issue.assignee_id|default:"" combobox_selected_name=issue.assignee.get_display_name|default:"" combobox_size="sm" %}
+      <h3 class="font-semibold mb-1 text-sm text-gray-500">{% translate "Assignees" %}</h3>
+      {% include "includes/user_multi_combobox.html" with combobox_name="assignees" combobox_members=workspace_members combobox_selected=epic_assignees combobox_size="sm" %}
     </div>
     <div>
       <h3 class="font-semibold mb-1 text-sm text-gray-500">{% translate "Milestone" %}</h3>

@@ -10,17 +10,23 @@ from apps.projects.factories import ProjectFactory
 from apps.projects.models import Project, ProjectStatus
 from apps.users.factories import UserFactory
 from apps.workspaces.factories import MembershipFactory, WorkspaceFactory
-from apps.workspaces.roles import ROLE_MEMBER
+from apps.workspaces.roles import ROLE_ADMIN, ROLE_MEMBER
 
 
 class ProjectViewTestCase(TestCase):
-    """Base test case providing common fixtures for view tests."""
+    """Base test case providing common fixtures for view tests.
+
+    The logged-in user is a workspace ADMINISTRATOR because creating, updating,
+    deleting and moving projects is administrator-only. These classes exercise
+    what those views *do* once permission is granted; who is allowed to reach
+    them in the first place is covered by test_permissions.py.
+    """
 
     @classmethod
     def setUpTestData(cls):
         cls.workspace = WorkspaceFactory()
         cls.user = UserFactory()
-        MembershipFactory(workspace=cls.workspace, user=cls.user, role=ROLE_MEMBER)
+        MembershipFactory(workspace=cls.workspace, user=cls.user, role=ROLE_ADMIN)
 
     def setUp(self):
         self.client = Client()
@@ -928,12 +934,18 @@ class ProjectBulkMoveViewTest(ProjectViewTestCase):
 
 
 class ProjectMoveViewTest(ProjectViewTestCase):
-    """Tests for ProjectMoveView (single project move)."""
+    """Tests for ProjectMoveView (single project move).
+
+    The base class already logs in a workspace administrator, which is who may
+    move a project. The gate itself is covered by ProjectMoveAdminGateTest in
+    test_permissions.py; what is exercised here is the move behaviour once the
+    gate has been passed.
+    """
 
     def setUp(self):
         super().setUp()
         self.target_workspace = WorkspaceFactory()
-        MembershipFactory(workspace=self.target_workspace, user=self.user, role=ROLE_MEMBER)
+        MembershipFactory(workspace=self.target_workspace, user=self.user, role=ROLE_ADMIN)
         self.project = ProjectFactory(workspace=self.workspace)
 
     def _get_move_url(self, project=None):

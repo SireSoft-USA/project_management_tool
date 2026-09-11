@@ -14,7 +14,7 @@ from django.conf import settings
 from django.db import transaction
 
 from apps.issues.activity import parent_epic_of
-from apps.issues.changes import EMPTY_DISPLAY, FIELD_LABELS
+from apps.issues.changes import EMPTY_DISPLAY, FIELD_LABELS, describe_assignment_change
 from apps.notifications.recipients import epic_activity_admin_copies, epic_activity_recipient
 from apps.notifications.tasks import (
     send_assignment_digest_email,
@@ -175,7 +175,7 @@ def notify_epic_activity(issue, *, changes, actor=None, created=False) -> bool:
     return True
 
 
-def notify_epic_changed(epic, *, changes, actor=None) -> bool:
+def notify_epic_changed(epic, *, changes, actor=None, exclude_recipients=None) -> bool:
     """Queue an "your epic changed" email for an edit to the Epic itself.
 
     Separate from ``notify_epic_activity`` because that one answers "which Epic
@@ -199,6 +199,8 @@ def notify_epic_changed(epic, *, changes, actor=None) -> bool:
         epic: The Epic that was edited.
         changes: Change dicts from ``changes.diff``. Empty stops the send.
         actor: User who made the change; None for system-driven changes.
+        exclude_recipients: Assignees to leave out, because they are already
+            receiving a more specific email about this same edit.
     """
     if not changes:
         return False
@@ -214,8 +216,64 @@ def notify_epic_changed(epic, *, changes, actor=None) -> bool:
         changes,
         actor.pk if actor else None,
         False,
+        [user.pk for user in exclude_recipients] if exclude_recipients else None,
     )
     return True
+
+
+def notify_epic_assignment_change(epic, assignment_diff, *, actor=None) -> int:
+    """Tell the right people that an Epic's assignees changed.
+
+    Three groups, and they need different things said to them:
+
+      * **Newly added** get "you have been assigned to this epic". They have no
+        idea it exists yet, so a diff naming other people would mean nothing to
+        them - they need the epic itself.
+      * **Still assigned** get the change reported alongside any other edit, as
+        one more line in the epic-changed email. It is context about work they
+        already follow.
+      * **Removed** get nothing. They asked for no further involvement (or
+        somebody decided it for them), and the link would take them to work that
+        is no longer theirs. Silence is the kinder default; make it explicit
+        rather than an accident.
+
+    The actor is excluded throughout by the recipient rules, so adding yourself
+    to an epic does not email you about it.
+
+    Args:
+        epic: The Epic whose assignees changed.
+        assignment_diff: An apps.issues.assignments.AssignmentDiff.
+        actor: Who made the change.
+
+    Returns:
+        How many notifications were queued.
+    """
+    if not assignment_diff:
+        return 0
+
+    queued = 0
+
+    # Newly added people are told about the epic itself.
+    for user in assignment_diff.added:
+        if _should_notify_assignment(epic, user, actor, None):
+            _dispatch(send_assignment_email, epic.pk, user.pk, actor.pk if actor else None)
+            queued += 1
+
+    # Everyone who was already following it hears what changed. Routed through
+    # the normal epic-changed path so it obeys the same opt-out, membership and
+    # self-action rules, and is deduplicated against any other edit in the same
+    # save by the delivery record.
+    # Newly added people are excluded: they have just been sent the "assigned to
+    # you" email, which tells them more than the diff would.
+    if notify_epic_changed(
+        epic,
+        changes=describe_assignment_change(assignment_diff),
+        actor=actor,
+        exclude_recipients=assignment_diff.added,
+    ):
+        queued += 1
+
+    return queued
 
 
 def notify_bulk_epic_activity(issues, *, field, old_values, new_display, actor=None) -> int:

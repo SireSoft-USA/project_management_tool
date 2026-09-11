@@ -9,8 +9,20 @@ from apps.workspaces.roles import ROLE_MEMBER
 
 
 class TestHomeView(TestCase):
-    def test_unauthenticated_user_gets_landing_page(self):
+    def test_unauthenticated_user_is_redirected_to_login(self):
+        """This is a private instance: signup is disabled, so a stranger has
+        nothing to act on in the marketing page. Sending them straight to the
+        sign-in form removes a pointless click."""
         response = self.client.get(reverse("landing_pages:home"))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login/", response.url)
+
+    @override_settings(LANDING_PAGE_FOR_ANONYMOUS=True)
+    def test_the_landing_page_can_be_restored_for_a_public_deployment(self):
+        """A public instance wants the marketing page as its front door."""
+        response = self.client.get(reverse("landing_pages:home"))
+
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "landing_pages/landing_page.html")
 
@@ -64,8 +76,16 @@ class TestHealthCheckView(TestCase):
         self.assertEqual(response.status_code, 404)
 
     @override_settings(HEALTH_CHECK_TOKENS=["secret-token"])
+    @patch("health_check.contrib.redis.backends.RedisHealthCheck.check_status")
     @patch("health_check.contrib.celery.backends.CeleryHealthCheck.check_status")
-    def test_valid_token_returns_200(self, _mock_celery_check):
+    def test_valid_token_returns_200(self, _mock_celery_check, _mock_redis_check):
+        """Both external backends are stubbed.
+
+        MainView returns 500 if any registered backend reports a failure, so an
+        unmocked backend would make this assert that the developer's machine
+        happens to be running Redis and Celery - not that the view authorises the
+        token and renders. The token check is what this test is about.
+        """
         response = self.client.get(reverse("landing_pages:health_check"), {"token": "secret-token"})
         self.assertEqual(response.status_code, 200)
 

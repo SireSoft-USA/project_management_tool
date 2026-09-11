@@ -4,6 +4,7 @@ from apps.issues.models import (
     BugSeverity,
     Chore,
     Epic,
+    EpicAssignment,
     IssuePriority,
     IssueStatus,
     Milestone,
@@ -11,6 +12,7 @@ from apps.issues.models import (
     Subtask,
 )
 from apps.projects.factories import ProjectFactory
+from apps.users.factories import UserFactory
 
 import factory
 
@@ -152,3 +154,18 @@ class SubtaskFactory(factory.django.DjangoModelFactory):
         obj = model_class(**kwargs)
         obj.key = obj._generate_unique_key()
         return parent.add_child(instance=obj)
+
+
+class EpicAssignmentFactory(factory.django.DjangoModelFactory):
+    """Factory for assigning a user to an Epic.
+
+    Both epic and user default to freshly built objects so a test that only
+    cares that *an* assignment exists can call this with no arguments.
+    """
+
+    class Meta:
+        model = EpicAssignment
+
+    epic = factory.SubFactory(EpicFactory)
+    user = factory.SubFactory(UserFactory)
+    added_by = None

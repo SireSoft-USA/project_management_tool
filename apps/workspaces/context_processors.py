@@ -43,3 +43,27 @@ def default_workspace(request):
             return {"default_workspace": ws}
 
     return {}
+
+
+def workspace_permissions(request):
+    """Expose the current user's workspace role to every template.
+
+    Templates use ``can_manage_projects`` to hide create/edit/delete controls
+    from members who are not workspace administrators, so the UI never offers an
+    action the view would refuse.
+
+    This is a context processor rather than per-view context because the project
+    templates are rendered from several places - the list view, the bulk action
+    view, and two inline-edit views all render them directly with hand-built
+    context dicts. Setting the flag in one view would leave the others silently
+    missing it, which fails the wrong way: an administrator would lose their
+    buttons. Defining it once here covers every render path.
+
+    Costs no query: the middleware has already resolved and cached the
+    membership on the request.
+
+    This hides controls; it does not grant anything. The view guard
+    (WorkspaceAdminForProjectsMixin) remains the actual authorization check.
+    """
+    membership = getattr(request, "workspace_membership", None)
+    return {"can_manage_projects": bool(membership and membership.is_admin())}

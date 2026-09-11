@@ -37,6 +37,25 @@ def _combobox_context(form_field, request=None):
     }
 
 
+def _multi_combobox_context(form_field):
+    """Context for the multi-select combobox.
+
+    The template iterates model instances rather than (value, label) pairs so it
+    can show each person's initials, so the field's queryset is passed straight
+    through. ``value()`` holds whatever is currently selected - the submitted
+    list on a bound form, the initial one otherwise - as primary keys, which are
+    matched against the queryset to recover the objects.
+    """
+    members = list(form_field.field.queryset)
+    selected_ids = {str(pk) for pk in (form_field.value() or [])}
+
+    return {
+        "combobox_name": form_field.html_name,
+        "combobox_members": members,
+        "combobox_selected": [member for member in members if str(member.pk) in selected_ids],
+    }
+
+
 def _render_field(context, form_field, **attrs):
     if form_field.is_hidden:
         return mark_safe(get_template("utils/forms/field_hidden.html").render({"form_field": form_field}))
@@ -46,6 +65,8 @@ def _render_field(context, form_field, **attrs):
 
     if widget_type == "usercombobox":
         ctx.update(_combobox_context(form_field, context.get("request")))
+    elif widget_type == "usermulticombobox":
+        ctx.update(_multi_combobox_context(form_field))
 
     tmpl = select_template(
         [

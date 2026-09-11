@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import timedelta
 
 from django.test import TestCase
 from django.utils import timezone
@@ -250,7 +250,12 @@ class IssueQuerySetOverdueTest(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.project = ProjectFactory()
-        today = date.today()
+        # overdue() compares against timezone.now().date(), which is UTC because
+        # USE_TZ is enabled. date.today() is the machine's *local* date, and the
+        # two disagree for part of every day in any non-UTC timezone - which made
+        # this test fail purely on what time it was run. Use the same clock as the
+        # query.
+        today = timezone.now().date()
         cls.overdue = EpicFactory(project=cls.project, due_date=today - timedelta(days=1))
         cls.not_overdue = EpicFactory(project=cls.project, due_date=today + timedelta(days=1))
         cls.done_overdue = EpicFactory(

@@ -168,6 +168,7 @@ TEMPLATES = [
                 "matorral.context_processors.google_analytics_id",
                 "apps.workspaces.context_processors.default_workspace",
                 "apps.workspaces.context_processors.onboarding_context",
+                "apps.workspaces.context_processors.workspace_permissions",
             ],
             "loaders": _DEFAULT_LOADERS if DEBUG else _CACHED_LOADERS,
         },
@@ -245,6 +246,12 @@ ACCOUNT_EMAIL_VERIFICATION = env("ACCOUNT_EMAIL_VERIFICATION", default="none")
 
 # False = invitation-only signups.
 ACCOUNT_ALLOW_SIGNUPS = env.bool("ACCOUNT_ALLOW_SIGNUPS", default=False)
+
+# Whether an anonymous visitor to "/" sees the marketing page or is sent straight
+# to the sign-in form. Defaults to the redirect: this is a private instance, so a
+# stranger has nothing to act on there. A public deployment that wants the
+# marketing page as its front door sets this to True.
+LANDING_PAGE_FOR_ANONYMOUS = env.bool("LANDING_PAGE_FOR_ANONYMOUS", default=False)
 
 AUTHENTICATION_BACKENDS = (
     "django.contrib.auth.backends.ModelBackend",
@@ -432,6 +439,18 @@ CACHES = {
 }
 
 CELERY_BROKER_URL = CELERY_RESULT_BACKEND = REDIS_URL
+
+# Fail fast when the broker is unreachable rather than retrying inside the
+# request. apps.notifications.services._dispatch catches the failure and sends
+# the email inline, so a slow give-up is paid by whoever clicked Save. Kept short
+# because the fallback is the thing that actually delivers in that situation;
+# a reachable broker never waits this long.
+CELERY_BROKER_TRANSPORT_OPTIONS = {
+    "socket_connect_timeout": 2,
+    "socket_timeout": 2,
+    "max_retries": 0,
+}
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = False
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 CELERY_WORKER_MAX_MEMORY_PER_CHILD = 400_000  # 400MB in kB; only effective with prefork pool
 CELERY_TASK_ALWAYS_EAGER = "test" in sys.argv

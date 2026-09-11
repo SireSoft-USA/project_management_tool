@@ -1,10 +1,12 @@
+import hashlib
+import json
 import uuid
 
 from django.conf import settings
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
-from apps.notifications.managers import NotificationPreferenceManager
+from apps.notifications.managers import NotificationDeliveryManager, NotificationPreferenceManager
 from apps.utils.models import BaseModel
 
 
@@ -108,3 +110,89 @@ _PREFERENCE_FIELDS = {
     NotificationKind.EPIC_INACTIVITY: "notify_on_epic_inactivity",
     NotificationKind.EPIC_ACTIVITY: "notify_on_epic_activity",
 }
+
+
+class NotificationDelivery(BaseModel):
+    """A record that one notification reached one person, so a retry does not resend it.
+
+    Celery retries the whole task. That is right for a transport failure - a mail
+    server that was briefly down should not cost somebody their notification -
+    but it means a task that failed *partway* runs again from the top. With one
+    email per recipient, a failure on the third of five re-sends to the first
+    two. The people who already got the mail get it twice.
+
+    So each (event, recipient) pair is claimed here before the message is built.
+    A claim that already exists means the mail went out on an earlier attempt and
+    this one skips it. The unique constraint is what makes that safe under
+    concurrency: two workers racing on the same pair, only one insert survives,
+    and the loser declines rather than duplicating.
+
+    Rows are a delivery log, not queue state. They are written once and never
+    updated, which is what lets ``sent_at`` be trusted as "this actually left".
+    """
+
+    # Identifies the event *and* the recipient. Built by build_idempotency_key()
+    # rather than assembled at call sites, so every caller hashes the same fields
+    # in the same order - two spellings of "the same event" would defeat the
+    # whole mechanism.
+    idempotency_key = models.CharField(
+        _("Idempotency Key"),
+        max_length=64,
+        unique=True,
+        editable=False,
+        help_text=_("Hash identifying one notification event for one recipient."),
+    )
+    recipient = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name=_("Recipient"),
+        on_delete=models.CASCADE,
+        related_name="notification_deliveries",
+    )
+    kind = models.CharField(
+        _("Kind"),
+        max_length=32,
+        help_text=_("A NotificationKind value. Stored as text so an old row survives a renamed kind."),
+    )
+    # NULL until the send is confirmed. A row with no timestamp means a claim was
+    # taken but the send did not complete - which is exactly the state a retry
+    # needs to see in order to try again rather than skip.
+    sent_at = models.DateTimeField(_("Sent At"), null=True, blank=True, db_index=True)
+
+    objects = NotificationDeliveryManager()
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["recipient", "kind"]),
+        ]
+        ordering = ["-created_at"]
+        verbose_name = _("Notification Delivery")
+        verbose_name_plural = _("Notification Deliveries")
+
+    def __str__(self):
+        state = "sent" if self.sent_at else "pending"
+        return f"{self.kind} to {self.recipient} ({state})"
+
+
+def build_idempotency_key(*, kind: str, recipient_id: int, **parts) -> str:
+    """Return the stable key identifying one notification event for one person.
+
+    Two attempts at the same notification must produce the same key, and two
+    genuinely different notifications must not. So the inputs are sorted and
+    JSON-encoded before hashing: a dict that happens to iterate in a different
+    order, or an int where a string was used last time, would otherwise look like
+    a different event and let a duplicate through.
+
+    Hashed rather than stored raw because the change list is part of the identity
+    - it is what distinguishes "set status to Done" from "set status to Blocked"
+    on the same issue - and is far too long for an indexed column.
+
+    Args:
+        kind: A NotificationKind value.
+        recipient_id: The user being notified. Part of the key, so fanning one
+            event out to five people yields five distinct claims.
+        **parts: Whatever else identifies the event - issue and epic ids, the
+            actor, the rendered changes.
+    """
+    payload = {"kind": str(kind), "recipient_id": recipient_id, **parts}
+    encoded = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode()).hexdigest()

@@ -53,8 +53,11 @@
         </div>
       </div>
       <div class="flex items-center gap-2">
+        {% if can_manage_projects %}
         {% json_vals page=page_obj.number search=search_query status_filter=status_filter lead_filter=lead_filter group_by=group_by as project_bulk_hx_vals %}
         {% include "generic_ui/_bulk_toolbar.html" with select_name="projects" list_hx_vals=project_bulk_hx_vals %}
+        {% endif %}
+        {% if can_manage_projects %}
         <button type="button"
                 class="btn btn-primary"
                 hx-get="{% url 'projects:project_create' workspace.slug %}?modal=1"
@@ -64,6 +67,7 @@
           <span class="mt-icon"><i class="fa fa-plus"></i></span>
           <span>{% translate "New Project" %}</span>
         </button>
+        {% endif %}
       </div>
     </div>
     {% include "includes/loading_indicator.html" with indicator_id="list-loading" %}
@@ -152,12 +156,14 @@
       {% endif %}
       {% endpartialdef list-content %}
     </div>
+    {% if can_manage_projects %}
     {% include "projects/includes/bulk_delete_modal.html" %}
     {% include "projects/includes/bulk_lead_modal.html" %}
     {% include "projects/includes/bulk_move_modal.html" %}
+    {% endif %}
     {% include "includes/filters_modal.html" with dispatch_event="filters-apply-page" %}
     {% include "includes/cascade_status_modal.html" %}
-    {% include "projects/includes/new_project_modal.html" %}
+    {% if can_manage_projects %}{% include "projects/includes/new_project_modal.html" %}{% endif %}
   </section>
   <div id="messages" class="toast toast-end toast-bottom z-50" hx-swap-oob="true">
     {% include "includes/messages.html" %}

@@ -32,6 +32,7 @@
               :title="expanded ? '{% translate "Collapse details" %}' : '{% translate "Expand details" %}'">
         <i class="fa transition-transform duration-200" :class="expanded ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
       </button>
+      {% if can_manage_projects %}
       <div class="dropdown dropdown-end">
         <div tabindex="0" role="button" class="btn btn-sm btn-ghost btn-square">
           <i class="fa fa-ellipsis-vertical"></i>
@@ -75,9 +76,10 @@
             method="post" class="hidden">
         {% csrf_token %}
       </form>
+      {% endif %}
     </div>
   </div>
-  {% include "projects/includes/move_modal.html" %}
+  {% if can_manage_projects %}{% include "projects/includes/move_modal.html" %}{% endif %}
 
   <div class="mb-4" x-show="expanded">
     <h3 class="font-semibold mb-2">{% translate "Description" %}</h3>

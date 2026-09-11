@@ -215,43 +215,80 @@ class TestManageWorkspacesView(WorkspaceTestMixin, TestCase):
 
 
 class TestCreateWorkspaceView(WorkspaceTestMixin, TestCase):
-    def test_get_returns_200(self):
+    """Creating a *new* workspace is gated on User.is_staff.
+
+    Unlike the project views - where permission is the workspace membership role -
+    there is no existing workspace here to hold a role in, so a tenant-scoped
+    check has nothing to read. Provisioning a new tenant is an operator action,
+    and is_staff is the flag that marks an operator.
+
+    WorkspaceTestMixin.admin is an administrator *of an existing workspace* and
+    is deliberately not staff, so these tests grant the flag explicitly rather
+    than relying on that fixture.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.staff = UserFactory(is_staff=True)
+
+    def test_non_staff_workspace_admin_cannot_open_the_create_form(self):
+        """Being an administrator of one workspace does not make you an operator."""
         self.client.force_login(self.admin)
+
+        response = self.client.get(reverse("workspaces:create_workspace"))
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_non_staff_user_cannot_create_a_workspace(self):
+        self.client.force_login(self.member)
+
+        self.client.post(reverse("workspaces:create_workspace"), {"name": "Unauthorized Workspace"})
+
+        self.assertFalse(Workspace.objects.filter(name="Unauthorized Workspace").exists())
+
+    def test_anonymous_user_is_redirected_to_login(self):
+        response = self.client.get(reverse("workspaces:create_workspace"))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login/", response.url)
+
+    def test_get_returns_200(self):
+        self.client.force_login(self.staff)
         url = reverse("workspaces:create_workspace")
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
 
     def test_post_creates_workspace_and_redirects(self):
-        self.client.force_login(self.admin)
+        self.client.force_login(self.staff)
         url = reverse("workspaces:create_workspace")
         response = self.client.post(url, {"name": "Brand New Workspace"})
         self.assertTrue(Workspace.objects.filter(name="Brand New Workspace").exists())
         self.assertRedirects(response, reverse("workspaces:manage_workspaces"), fetch_redirect_response=False)
 
     def test_post_creates_admin_membership_for_creator(self):
-        self.client.force_login(self.admin)
+        self.client.force_login(self.staff)
         url = reverse("workspaces:create_workspace")
         self.client.post(url, {"name": "Another Workspace"})
         workspace = Workspace.objects.get(name="Another Workspace")
-        self.assertTrue(Membership.objects.filter(workspace=workspace, user=self.admin, role=ROLE_ADMIN).exists())
+        self.assertTrue(Membership.objects.filter(workspace=workspace, user=self.staff, role=ROLE_ADMIN).exists())
 
     def test_post_invalid_slug_returns_form_with_errors(self):
         # Use a duplicate slug to trigger model-level unique validation
-        self.client.force_login(self.admin)
+        self.client.force_login(self.staff)
         url = reverse("workspaces:create_workspace")
         response = self.client.post(url, {"name": "Duplicate Slug Workspace", "slug": self.workspace.slug})
         self.assertEqual(response.status_code, 200)
         self.assertFalse(Workspace.objects.filter(name="Duplicate Slug Workspace").exists())
 
     def test_htmx_post_returns_hx_redirect_on_success(self):
-        self.client.force_login(self.admin)
+        self.client.force_login(self.staff)
         url = reverse("workspaces:create_workspace")
         response = self.client.post(url, {"name": "HTMX Workspace"}, headers={"HX-Request": "true"})
         self.assertIn("HX-Redirect", response)
 
     def test_htmx_post_invalid_returns_form_fragment(self):
         # Use a duplicate slug to trigger model-level unique validation
-        self.client.force_login(self.admin)
+        self.client.force_login(self.staff)
         url = reverse("workspaces:create_workspace")
         response = self.client.post(
             url, {"name": "Another Duplicate", "slug": self.workspace.slug}, headers={"HX-Request": "true"}

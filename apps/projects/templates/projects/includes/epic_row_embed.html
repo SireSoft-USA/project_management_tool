@@ -72,7 +72,11 @@
       hx-get="{% url 'issues:issue_inline_edit' workspace.slug epic.project.key epic.key %}?embed=project_epics"
       hx-target="closest tr"
       hx-swap="outerHTML">
-    {{ epic.assignee.get_display_name|default:"-" }}
+    {% comment %}
+      Every assignee is emailed about this epic, so the column lists all of them.
+      Showing only the primary owner would misrepresent who is involved.
+    {% endcomment %}
+    {% for assignment in epic.assignments.all %}{% if not forloop.first %}, {% endif %}{{ assignment.user.get_display_name }}{% empty %}-{% endfor %}
   </td>
   <td>
     <div class="dropdown dropdown-end dropdown-left">

@@ -42,6 +42,7 @@ def send_notification(
     template: str,
     context: dict,
     extra_cc: list[str] | None = None,
+    exclude_copies: list[str] | None = None,
 ) -> bool:
     """Render and send one notification email.
 
@@ -57,6 +58,11 @@ def send_notification(
             site-wide NOTIFICATION_COPY_TO. Used where a notification type has its
             own audit copy. Deduplicated case-insensitively against the recipient
             and against the site-wide list, so nobody is addressed twice.
+        exclude_copies: Further addresses to keep out of the copy list. Used when
+            one event fans out to several recipients: each of them is getting
+            their own message, so an audit address that belongs to one of them
+            must not also be copied here. Without it, a monitoring address that
+            is also an assignee receives the mail twice.
 
     Returns:
         True if the message was handed to the mail backend, False if a guard
@@ -74,9 +80,13 @@ def send_notification(
     text_body = render_to_string(f"{template}.txt", full_context)
     html_body = render_to_string(f"{template}.html", full_context)
 
-    copies = copy_recipients(exclude=[recipient.email])
+    # Every address that is already receiving this event in its own right, so it
+    # is never also added as a copy.
+    excluded = [recipient.email, *(exclude_copies or [])]
+
+    copies = copy_recipients(exclude=excluded)
     if extra_cc:
-        copies = _merge_extra_cc(copies, extra_cc, exclude=[recipient.email])
+        copies = _merge_extra_cc(copies, extra_cc, exclude=excluded)
 
     message = LogoEmailMessage(
         subject=subject,

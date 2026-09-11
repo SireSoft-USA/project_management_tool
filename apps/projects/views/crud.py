@@ -14,6 +14,7 @@ from django.views.generic import CreateView, DeleteView, DetailView, ListView, U
 
 from apps.issues.cascade import build_cascade_oob_response
 from apps.issues.forms import EpicForm, MilestoneForm, get_form_class_for_type
+from apps.issues.assignments import apply_epic_assignees
 from apps.issues.helpers import (
     annotate_epic_child_counts,
     build_grouped_epics_by_milestone,
@@ -43,7 +44,12 @@ from ..forms import ProjectDetailInlineEditForm, ProjectRowInlineEditForm
 from ..models import Project, ProjectStatus
 from ..registry import build_project_bulk_action_context
 from ..tasks import start_move_operation
-from .mixins import ProjectFormMixin, ProjectSingleObjectMixin, ProjectViewMixin, StaffRequiredMixin
+from .mixins import (
+    ProjectFormMixin,
+    ProjectSingleObjectMixin,
+    ProjectViewMixin,
+    WorkspaceAdminForProjectsMixin,
+)
 
 User = get_user_model()
 
@@ -247,14 +253,15 @@ class ProjectDetailView(
 
         return context
 
+
 class ProjectCreateView(
-    StaffRequiredMixin,                  
     LoginAndWorkspaceRequiredMixin,
+    WorkspaceAdminForProjectsMixin,
     ProjectViewMixin,
     ProjectFormMixin,
     CreateView,
 ):
-    """Create a new project — staff only."""
+    """Create a new project - workspace administrators only."""
 
     template_name = "projects/project_form.html"
 
@@ -313,14 +320,16 @@ class ProjectCreateView(
 
         return redirect(self.object.get_absolute_url())
 
-class ProjectUpdateView(           
+
+class ProjectUpdateView(
     LoginAndWorkspaceRequiredMixin,
+    WorkspaceAdminForProjectsMixin,
     ProjectViewMixin,
     ProjectSingleObjectMixin,
     ProjectFormMixin,
     UpdateView,
 ):
-    """Update an existing project — staff only."""
+    """Update an existing project - workspace administrators only."""
 
     template_name = "projects/project_form.html"
 
@@ -337,13 +346,14 @@ class ProjectUpdateView(
         return super().form_valid(form)
 
 
-class ProjectDeleteView(  
+class ProjectDeleteView(
     LoginAndWorkspaceRequiredMixin,
+    WorkspaceAdminForProjectsMixin,
     ProjectViewMixin,
     ProjectSingleObjectMixin,
     DeleteView,
 ):
-    """Delete a project — staff only."""
+    """Delete a project - workspace administrators only."""
 
     template_name = "projects/project_confirm_delete.html"
 
@@ -385,7 +395,7 @@ class ProjectDeleteView(
         return redirect(redirect_url)
 
 
-class ProjectCloneView(LoginAndWorkspaceRequiredMixin,StaffRequiredMixin, ProjectViewMixin, View):
+class ProjectCloneView(LoginAndWorkspaceRequiredMixin, WorkspaceAdminForProjectsMixin, ProjectViewMixin, View):
     """Clone an existing project."""
 
     def post(self, request, *args, **kwargs):
@@ -407,7 +417,7 @@ class ProjectCloneView(LoginAndWorkspaceRequiredMixin,StaffRequiredMixin, Projec
 # ============================================================================
 
 
-class ProjectRowInlineEditView(LoginAndWorkspaceRequiredMixin,StaffRequiredMixin, ProjectViewMixin, View):
+class ProjectRowInlineEditView(LoginAndWorkspaceRequiredMixin, WorkspaceAdminForProjectsMixin, ProjectViewMixin, View):
     """Handle inline editing of project rows in list views."""
 
     def _get_context(self, request, project, form=None):
@@ -498,7 +508,9 @@ class ProjectRowInlineEditView(LoginAndWorkspaceRequiredMixin,StaffRequiredMixin
         return render(request, edit_template, context)
 
 
-class ProjectDetailInlineEditView(LoginAndWorkspaceRequiredMixin,StaffRequiredMixin,ProjectViewMixin, View):
+class ProjectDetailInlineEditView(
+    LoginAndWorkspaceRequiredMixin, WorkspaceAdminForProjectsMixin, ProjectViewMixin, View
+):
     """Handle inline editing of project details on the detail page."""
 
     def _get_context(self, request, project, form=None):
@@ -612,7 +624,13 @@ class ProjectEpicsEmbedView(LoginAndWorkspaceRequiredMixin, ProjectViewMixin, Pr
         self.assignee_filter = self.request.GET.get("assignee", "").strip()
         self.milestone_filter = self.request.GET.get("milestone", "").strip()
 
-        queryset = Epic.objects.for_project(self.project).select_related("project", "project__workspace", "assignee")
+        queryset = (
+            Epic.objects.for_project(self.project)
+            .select_related("project", "project__workspace", "assignee")
+            # The Assignees column renders every assigned person, so without this
+            # the list would issue one query per row.
+            .prefetch_related("assignments__user")
+        )
 
         # Apply search filter
         if self.search_query:
@@ -1019,6 +1037,10 @@ class ProjectEpicCreateView(LoginAndWorkspaceRequiredMixin, ProjectViewMixin, Pr
         else:
             BaseIssue.add_root(instance=obj)
 
+        # The epic exists only after add_root/add_child, so the assignment rows
+        # cannot be written any earlier than this.
+        apply_epic_assignees(form, obj, actor=self.request.user)
+
         messages.success(self.request, _("Epic created successfully."))
 
         # For modal submissions, close modal, reload epics list, and show toast
@@ -1145,6 +1167,10 @@ class ProjectIssueCreateView(LoginAndWorkspaceRequiredMixin, ProjectViewMixin, P
             parent.add_child(instance=obj)
         else:
             BaseIssue.add_root(instance=obj)
+
+        # Epics are creatable from here too. apply_epic_assignees is a no-op for
+        # stories, bugs and chores, whose forms carry no assignees field.
+        apply_epic_assignees(form, obj, actor=self.request.user)
 
         issue_type_label = dict(ISSUE_TYPE_CHOICES).get(self.issue_type, _("Issue"))
         messages.success(
@@ -1284,8 +1310,16 @@ class ProjectMilestoneCreateView(LoginAndWorkspaceRequiredMixin, ProjectViewMixi
         return render(self.request, self.get_template_names()[0], context)
 
 
-class ProjectMoveView(LoginAndWorkspaceRequiredMixin, ProjectViewMixin, View, StaffRequiredMixin):
-    """Move a single project to another workspace (POST only)."""
+class ProjectMoveView(LoginAndWorkspaceRequiredMixin, WorkspaceAdminForProjectsMixin, ProjectViewMixin, View):
+    """Move a single project to another workspace (POST only) - staff only.
+
+    Mixin order matters twice over. The guard must come before View,
+    because Python resolves dispatch() left to right and View defines its own,
+    so a guard listed after it is never reached - which silently disabled the
+    staff check entirely. It must also come after LoginAndWorkspaceRequiredMixin,
+    so that anonymous users are sent to login and non-members get a 404, rather
+    than both being bounced to a project list they cannot see.
+    """
 
     http_method_names = ["post"]
 

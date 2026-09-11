@@ -46,22 +46,55 @@ class TestProfileView(TestCase):
         self.assertTrue(any("successfully saved" in str(m) for m in messages))
 
     @override_settings(ACCOUNT_EMAIL_VERIFICATION="none")
-    def test_post_email_change_without_mandatory_verification_updates_email_address(self):
+    def test_post_cannot_change_email_because_the_field_is_read_only(self):
+        """The profile form cannot be used to change an email address.
+
+        UserChangeForm declares email with disabled=True (apps/users/forms.py),
+        and Django ignores the submitted value for a disabled field, falling back
+        to the instance's own. So a POST carrying a different address is not
+        rejected - it is silently ignored, which is the intended behaviour: an
+        email change has to go through allauth, where it can be confirmed.
+
+        This test used to assert the opposite, from before the field was made
+        read-only. It is kept, inverted, so that re-enabling the field cannot
+        pass unnoticed: it is a deliberate product decision either way.
+        """
         EmailAddress.objects.create(user=self.user, email=self.user.email, verified=True, primary=True)
         self.client.force_login(self.user)
-        new_email = "newemail@example.com"
+        original_email = self.user.email
+
         self.client.post(
             PROFILE_URL,
             {
                 "first_name": self.user.first_name,
                 "last_name": self.user.last_name,
-                "email": new_email,
+                "email": "newemail@example.com",
                 "timezone": "",
             },
         )
+
         self.user.refresh_from_db()
-        self.assertEqual(self.user.email, new_email)
-        self.assertTrue(EmailAddress.objects.filter(user=self.user, email=new_email, primary=True).exists())
+        self.assertEqual(self.user.email, original_email)
+        self.assertFalse(EmailAddress.objects.filter(user=self.user, email="newemail@example.com").exists())
+
+    @override_settings(ACCOUNT_EMAIL_VERIFICATION="none")
+    def test_post_still_saves_the_editable_fields_when_email_is_submitted(self):
+        """The ignored email must not prevent the rest of the form from saving."""
+        EmailAddress.objects.create(user=self.user, email=self.user.email, verified=True, primary=True)
+        self.client.force_login(self.user)
+
+        self.client.post(
+            PROFILE_URL,
+            {
+                "first_name": "Changed",
+                "last_name": self.user.last_name,
+                "email": "newemail@example.com",
+                "timezone": "",
+            },
+        )
+
+        self.user.refresh_from_db()
+        self.assertEqual("Changed", self.user.first_name)
 
     @override_settings(ACCOUNT_EMAIL_VERIFICATION="mandatory")
     def test_post_email_change_with_mandatory_verification_does_not_change_email(self):

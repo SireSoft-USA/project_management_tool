@@ -101,9 +101,15 @@
       {% endif %}
     </div>
     <div>
-      <h3 class="font-semibold mb-1 text-sm text-gray-500">{% translate "Assignee" %}</h3>
-      {% if issue.assignee %}
-        <p class="text-sm">{{ issue.assignee.get_display_name }}</p>
+      <h3 class="font-semibold mb-1 text-sm text-gray-500">{% translate "Assignees" %}</h3>
+      {# Every assignee is emailed about changes, so all of them are shown - a #}
+      {# header listing only the primary owner would misrepresent who is involved. #}
+      {% if epic_assignees %}
+        <div class="flex flex-wrap gap-1">
+          {% for member in epic_assignees %}
+            <span class="badge badge-ghost">{{ member.get_display_name }}</span>
+          {% endfor %}
+        </div>
       {% else %}
         <span class="text-gray-400">—</span>
       {% endif %}

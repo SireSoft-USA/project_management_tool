@@ -20,7 +20,7 @@ from ..forms import BulkActionForm
 from ..models import Project, ProjectStatus
 from ..registry import apply_bulk_cascade, build_project_bulk_action_context, project_bulk_actions
 from .crud import GROUP_BY_CHOICES
-from .mixins import ProjectViewMixin
+from .mixins import ProjectViewMixin, WorkspaceAdminForProjectsMixin
 
 User = get_user_model()
 
@@ -33,8 +33,14 @@ def _get_redirect_url_with_page(workspace_slug: str, page: int | None) -> str:
     return url
 
 
-class ProjectBulkActionView(ProjectViewMixin, LoginAndWorkspaceRequiredMixin, View):
-    """Generic dispatch view for all bulk project actions.
+class ProjectBulkActionView(LoginAndWorkspaceRequiredMixin, WorkspaceAdminForProjectsMixin, ProjectViewMixin, View):
+    """Generic dispatch view for all bulk project actions - administrators only.
+
+    Gated for the same reason the single-project views are: the registry behind
+    this one endpoint can delete projects, change their status, reassign their
+    lead, and move them between workspaces. Leaving it open would make the guard
+    on ProjectDeleteView decorative - the same capability would remain one POST
+    away at a different URL.
 
     Looks up the action by name from the registry, validates forms, runs
     ``action.validate()``, then ``action.execute()``. Status-changing actions

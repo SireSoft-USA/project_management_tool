@@ -14,7 +14,7 @@ from apps.issues.models import (
     Story,
     Subtask,
 )
-from apps.issues.widgets import UserComboboxWidget
+from apps.issues.widgets import UserComboboxWidget, UserMultiComboboxWidget
 from apps.projects.models import Project
 from apps.workspaces.models import Workspace
 
@@ -92,8 +92,23 @@ class MilestoneForm(forms.ModelForm):
         return title
 
 
+# An Epic may be assigned to several people, but not unboundedly many: every
+# assignee receives their own email for every change, so a careless selection of
+# the whole workspace turns one edit into a mailshot. High enough never to
+# obstruct a real team, low enough to bound the fan-out.
+MAX_EPIC_ASSIGNEES = 25
+
+
 class EpicForm(BaseIssueForm):
     """Form for creating/editing Epics."""
+
+    assignees = forms.ModelMultipleChoiceField(
+        queryset=User.objects.none(),
+        required=False,
+        label=_("Assignees"),
+        help_text=_("Everyone assigned here is emailed when this epic or its work items change."),
+        widget=UserMultiComboboxWidget,
+    )
 
     class Meta:
         model = Epic
@@ -120,12 +135,40 @@ class EpicForm(BaseIssueForm):
             self.fields["project"].queryset = Project.objects.for_workspace(self.workspace).for_choices()
 
         # Set up assignee queryset - use cached workspace_members if provided
+        members = self._workspace_member_queryset()
+        if members is not None:
+            self.fields["assignee"].queryset = members
+            # The same queryset is the authorization control for the multi-select:
+            # a posted pk outside the workspace fails validation server-side, so
+            # somebody cannot assign an epic to a stranger by guessing an id.
+            self.fields["assignees"].queryset = members
+
+        if self.instance.pk and not self.is_bound:
+            self.initial.setdefault("assignees", list(self.instance.assignments.values_list("user_id", flat=True)))
+
+    def _workspace_member_queryset(self):
+        """Members eligible to be assigned, or None when no scope is known."""
         if self.workspace_members is not None:
-            self.fields["assignee"].queryset = self.workspace_members
-        elif self.project:
-            self.fields["assignee"].queryset = User.objects.for_workspace(self.project.workspace).for_choices()
-        elif self.workspace:
-            self.fields["assignee"].queryset = User.objects.for_workspace(self.workspace).for_choices()
+            return self.workspace_members
+        if self.project:
+            return User.objects.for_workspace(self.project.workspace).for_choices()
+        if self.workspace:
+            return User.objects.for_workspace(self.workspace).for_choices()
+        return None
+
+    def clean_assignees(self):
+        """Bound the fan-out.
+
+        ModelMultipleChoiceField already rejects unknown and out-of-workspace ids
+        (its queryset is the workspace's members) and de-duplicates repeated ones,
+        so only the size limit is left to enforce.
+        """
+        assignees = self.cleaned_data.get("assignees")
+        if assignees is not None and len(assignees) > MAX_EPIC_ASSIGNEES:
+            raise forms.ValidationError(
+                _("An epic can have at most %(limit)d assignees.") % {"limit": MAX_EPIC_ASSIGNEES}
+            )
+        return assignees
 
     def _setup_parent_queryset(self):
         """Epics can optionally be placed under a Milestone."""
@@ -439,6 +482,27 @@ class EpicDetailInlineEditForm(IssueRowInlineEditForm):
         required=False,
         widget=forms.DateInput(attrs={"type": "date"}),
     )
+    # The full set of people to notify. Its queryset is restricted to workspace
+    # members in __init__, which is what stops a posted id from outside the
+    # workspace being accepted.
+    assignees = forms.ModelMultipleChoiceField(
+        queryset=User.objects.none(),
+        required=False,
+        label=_("Assignees"),
+    )
+
+    def __init__(self, *args, workspace_members=None, **kwargs):
+        super().__init__(*args, workspace_members=workspace_members, **kwargs)
+        if workspace_members is not None:
+            self.fields["assignees"].queryset = workspace_members
+
+    def clean_assignees(self):
+        assignees = self.cleaned_data.get("assignees")
+        if assignees is not None and len(assignees) > MAX_EPIC_ASSIGNEES:
+            raise forms.ValidationError(
+                _("An epic can have at most %(limit)d assignees.") % {"limit": MAX_EPIC_ASSIGNEES}
+            )
+        return assignees
 
     def clean_description(self):
         description = self.cleaned_data.get("description")

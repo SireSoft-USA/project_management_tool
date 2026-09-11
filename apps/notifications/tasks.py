@@ -21,7 +21,8 @@ from apps.notifications.dispatch import (
     build_membership_message,
 )
 from apps.notifications.emails import LogoEmailMessage, build_logo_context, logo_bytes, send_notification
-from apps.notifications.recipients import epic_activity_admin_copies, epic_activity_recipient
+from apps.notifications.models import NotificationDelivery, NotificationKind, build_idempotency_key
+from apps.notifications.recipients import epic_activity_admin_copies, epic_activity_recipients
 
 from matorral.context_processors import get_root
 
@@ -120,8 +121,9 @@ def send_epic_activity_email(
     changes: list[dict],
     actor_id: int | None = None,
     created: bool = False,
+    exclude_recipient_ids: list[int] | None = None,
 ) -> bool:
-    """Email an epic's assignee that one of its work items changed.
+    """Email every one of an epic's assignees that one of its work items changed.
 
     The change list is carried in the payload rather than recomputed here: the
     values it describes were overwritten the moment the row was saved, so the
@@ -129,9 +131,20 @@ def send_epic_activity_email(
     exactly the same email rather than a differently-worded one.
 
     Recipients are resolved here rather than passed in, because the epic may have
-    been reassigned between the edit and this task running. Sending to the address
-    captured at queue time would email somebody who no longer owns the epic, and
-    withhold it from whoever now does.
+    been reassigned - or gained an assignee - between the edit and this task
+    running. Sending to the addresses captured at queue time would email whoever
+    *used* to own the epic and withhold it from whoever owns it now.
+
+    Each recipient's send is claimed in NotificationDelivery first, so a retry
+    after a partway failure resumes rather than starting over: whoever already
+    received the email is skipped, and only the outstanding recipients are sent
+    to.
+
+    Returns:
+        True if at least one message reached the mail backend. False means every
+        recipient was declined by a guard (opted out, no address, inactive) or
+        had already been delivered to, both of which are normal outcomes and not
+        errors.
     """
     BaseIssue = apps.get_model("issues", "BaseIssue")
     Epic = apps.get_model("issues", "Epic")
@@ -143,10 +156,19 @@ def send_epic_activity_email(
         return False
 
     actor = _get(User, actor_id) if actor_id else None
-    recipient = epic_activity_recipient(epic, actor)
+    recipients = epic_activity_recipients(epic, actor)
+
+    # Somebody just added to the epic has already been sent the fuller "you have
+    # been assigned" email. Sending them the diff as well would mean two messages
+    # about one edit, the second of which reads oddly - it names them as a change
+    # to an epic they have only just heard of.
+    if exclude_recipient_ids:
+        excluded = set(exclude_recipient_ids)
+        recipients = [user for user in recipients if user.pk not in excluded]
+
     admin_cc = epic_activity_admin_copies()
 
-    if recipient is None:
+    if not recipients:
         # Nobody to address: with an audit copy configured the message still has
         # somewhere to go, so it is sent from the admin address to itself rather
         # than dropped. Without one there is no message to send.
@@ -157,10 +179,68 @@ def send_epic_activity_email(
             issue=issue, epic=epic, changes=changes, actor=actor, created=created, admin_cc=admin_cc
         )
 
-    message = build_epic_activity_message(
-        issue=issue, epic=epic, changes=changes, recipient=recipient, actor=actor, created=created
-    )
-    return send_notification(**message, extra_cc=admin_cc)
+    # One message per recipient rather than one message with several addresses in
+    # To. Each has to carry that person's own unsubscribe token and pass their own
+    # opt-out check, neither of which a shared message can do correctly. It also
+    # keeps one bad address from failing the whole batch, and stops recipients
+    # seeing each other's addresses.
+    #
+    # The audit copy rides along with the first message only, and is told about
+    # every recipient address so that an admin who is also an assignee is not
+    # copied on top of their own email.
+    recipient_addresses = [user.email for user in recipients if user.email]
+    sent_any = False
+
+    for index, recipient in enumerate(recipients):
+        # Claimed before the message is built, so a retry after a partway failure
+        # skips whoever already received it. Without this, a transport error on
+        # the third of five recipients would re-send to the first two.
+        delivery = NotificationDelivery.objects.claim(
+            idempotency_key=build_idempotency_key(
+                kind=NotificationKind.EPIC_ACTIVITY,
+                recipient_id=recipient.pk,
+                issue_id=issue_id,
+                epic_id=epic_id,
+                actor_id=actor_id,
+                created=created,
+                changes=changes,
+            ),
+            recipient=recipient,
+            kind=NotificationKind.EPIC_ACTIVITY,
+        )
+        if delivery is None:
+            logger.info(
+                "Epic activity email already delivered to user %s for epic %s; not resending",
+                recipient.pk,
+                epic_id,
+            )
+            continue
+
+        message = build_epic_activity_message(
+            issue=issue, epic=epic, changes=changes, recipient=recipient, actor=actor, created=created
+        )
+        extra_cc = admin_cc if index == 0 else None
+
+        try:
+            sent = send_notification(**message, extra_cc=extra_cc, exclude_copies=recipient_addresses)
+        except Exception:
+            # The claim is released so the retry can try this person again. Left
+            # in place, a transport failure would look on the next attempt like a
+            # delivery that had already happened, and the notification would be
+            # lost rather than retried.
+            NotificationDelivery.objects.release(delivery)
+            raise
+
+        if sent:
+            NotificationDelivery.objects.confirm(delivery)
+            sent_any = True
+        else:
+            # Declined by a guard (opted out, no address, notifications off).
+            # Nothing was delivered, so no claim should remain to block a later
+            # legitimate send.
+            NotificationDelivery.objects.release(delivery)
+
+    return sent_any
 
 
 def _send_admin_only_epic_activity(*, issue, epic, changes, actor, created, admin_cc) -> bool:

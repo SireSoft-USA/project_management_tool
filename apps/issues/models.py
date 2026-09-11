@@ -9,6 +9,7 @@ from django.utils.translation import gettext_lazy as _
 
 from apps.issues.activity import EPIC_INACTIVITY_ALERT_AFTER
 from apps.issues.managers import IssueManager, KeyNumber
+from apps.utils.models import BaseModel
 from apps.utils.progress import build_progress_dict
 
 from auditlog.registry import auditlog
@@ -466,6 +467,73 @@ class Epic(BaseIssue):
             kwargs["update_fields"] = {*update_fields, "inactivity_alert_due_at"}
 
         super().save(*args, **kwargs)
+
+
+class EpicAssignment(BaseModel):
+    """One person assigned to one Epic.
+
+    An Epic can be owned by several people, and every Epic-level notification
+    goes to all of them. That is a many-to-many relationship, so it is modelled
+    as one - rather than as a second "assignee2" column, or a comma-separated
+    list, both of which stop working the moment a third person is added.
+
+    An explicit through-model rather than a plain ManyToManyField because the
+    rows carry their own data: who added the assignment and when. That is worth
+    having when somebody asks why they started receiving mail about an epic.
+
+    Epic.assignee is deliberately kept alongside this. It remains the *primary*
+    owner and is what the audit log, the issue-list grouping and filtering, and
+    the inactivity alert all read. This model is the full set of people to
+    notify; the primary owner is mirrored into it. Collapsing the two is a
+    larger refactor and is not required to support multiple assignees.
+    """
+
+    epic = models.ForeignKey(
+        "issues.Epic",
+        verbose_name=_("Epic"),
+        on_delete=models.CASCADE,
+        related_name="assignments",
+    )
+    user = models.ForeignKey(
+        User,
+        verbose_name=_("User"),
+        on_delete=models.CASCADE,
+        related_name="epic_assignments",
+    )
+    # Who performed the assignment. SET_NULL rather than CASCADE: deleting the
+    # person who made an assignment must not delete the assignment itself, or
+    # somebody would silently stop being notified because a *different* account
+    # was removed. related_name="+" because nothing needs to ask a user which
+    # assignments they handed out.
+    added_by = models.ForeignKey(
+        User,
+        verbose_name=_("Added By"),
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+
+    class Meta:
+        constraints = [
+            # The database is what actually guarantees one row per person per
+            # epic. Form-level de-duplication can be bypassed by any other write
+            # path, and a duplicate row here would mean a duplicate email.
+            models.UniqueConstraint(fields=["epic", "user"], name="unique_epic_assignee"),
+        ]
+        indexes = [
+            # Resolving recipients filters by epic; the user index serves the
+            # reverse question ("which epics is this person on?") and keeps the
+            # cascade cheap when a user is deleted.
+            models.Index(fields=["epic"]),
+            models.Index(fields=["user"]),
+        ]
+        ordering = ["created_at"]
+        verbose_name = _("Epic Assignment")
+        verbose_name_plural = _("Epic Assignments")
+
+    def __str__(self):
+        return f"{self.user} on {self.epic}"
 
 
 class WorkItemMixin(models.Model):

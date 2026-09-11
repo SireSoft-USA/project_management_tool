@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.http import Http404, HttpResponse, HttpResponseRedirect
 from django.shortcuts import render
+from django.urls import reverse
 from django.templatetags.static import static
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.cache import cache_control
@@ -26,10 +27,19 @@ def home(request):
         workspace = Workspace.objects.for_user(request.user).first()
         if workspace:
             return HttpResponseRedirect(workspace.get_absolute_url())
-        else:
-            return render(request, "landing_pages/landing_page.html", context)
-    else:
+        # Signed in but in no workspace yet: the marketing page is the only
+        # thing left to show them.
         return render(request, "landing_pages/landing_page.html", context)
+
+    # Anonymous visitors go straight to the sign-in page. This is a private
+    # instance - ACCOUNT_ALLOW_SIGNUPS is off, so there is nothing on the
+    # marketing page a stranger can act on, and the extra click to find "Sign
+    # In" is pure friction. Set LANDING_PAGE_FOR_ANONYMOUS=True to serve the
+    # marketing page instead, as a public deployment would want.
+    if not getattr(settings, "LANDING_PAGE_FOR_ANONYMOUS", False):
+        return HttpResponseRedirect(reverse("account_login"))
+
+    return render(request, "landing_pages/landing_page.html", context)
 
 
 @require_GET

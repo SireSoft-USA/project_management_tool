@@ -70,8 +70,10 @@
     {% if created %}{% translate "Details" %}{% else %}{% translate "Changes" %}{% endif %}
   </div>
 
-  {# Each row is one changed field. Values are escaped by Django, so a title
-     containing markup renders as visible text rather than live HTML. #}
+  {% comment %}
+    Each row is one changed field. Values are escaped by Django, so a title
+    containing markup renders as visible text rather than live HTML.
+  {% endcomment %}
   <table border="0" cellpadding="0" cellspacing="0" width="100%" style="font-size: 14px;">
     {% for change in changes %}
       <tr>
@@ -114,8 +116,10 @@
 {% endblock %}
 
 {% block footer %}
-  {# No unsubscribe_url means an operator-configured audit address rather than a
-     subscriber: there is no preference row behind it and nothing to unsubscribe. #}
+  {% comment %}
+    No unsubscribe_url means an operator-configured audit address rather than a
+    subscriber: there is no preference row behind it and nothing to unsubscribe.
+  {% endcomment %}
   {% if unsubscribe_url %}
     <p style="margin: 0 0 8px 0;">
       {% if is_epic_itself %}

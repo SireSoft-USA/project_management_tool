@@ -10,6 +10,7 @@ from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 from django.views.generic import CreateView, DeleteView, DetailView, ListView, UpdateView, View
 
+from apps.issues.assignments import apply_epic_assignees
 from apps.issues.cascade import build_cascade_oob_response, build_cascade_retarget_response
 from apps.issues.forms import (
     ISSUE_TYPES,
@@ -49,6 +50,31 @@ from .mixins import (
 )
 
 User = get_user_model()
+
+
+def _attach_messages_toast(request, response):
+    """Append an out-of-band toast to an HTMX partial response.
+
+    HTMX swaps only the fragment it was given, so a queued message has nowhere
+    to render on a partial update. Appending the toast container with
+    hx-swap-oob lets HTMX place it in the page's existing #messages element
+    without disturbing the fragment itself.
+
+    Left alone for a non-HTMX request: a full page render includes the messages
+    block already, and appending a second copy would duplicate it.
+    """
+    if not request.htmx:
+        return response
+
+    messages_html = render_to_string(
+        "includes/messages.html",
+        {"messages": messages.get_messages(request)},
+        request=request,
+    )
+    response.write(
+        f'<div id="messages" class="toast toast-end toast-bottom z-50" hx-swap-oob="true">{messages_html}</div>'
+    )
+    return response
 
 
 def _resolve_user(value):
@@ -323,6 +349,10 @@ class IssueDetailView(LoginAndWorkspaceRequiredMixin, IssueViewMixin, IssueSingl
             context["children"] = issue.get_children_issues()
             context["children_label"] = _("Issues")
             context["milestone"] = issue.get_parent()
+            # Everyone notified about this epic. The header lists all of them,
+            # because showing only the primary owner would misrepresent who is
+            # actually involved. One query, and only on an epic's own page.
+            context["epic_assignees"] = [a.user for a in issue.assignments.select_related("user")]
             context["progress"] = build_progress_dict(
                 issue.total_done_points,
                 issue.total_in_progress_points,
@@ -421,6 +451,8 @@ class IssueCreateView(LoginAndWorkspaceRequiredMixin, IssueViewMixin, IssueFormM
             saved_obj = BaseIssue.add_root(instance=obj)
             self.object = saved_obj
 
+        apply_epic_assignees(form, self.object, actor=self.request.user)
+
         messages.success(
             self.request,
             _("%(type)s created successfully.") % {"type": self.object.get_issue_type_display()},
@@ -503,6 +535,8 @@ class IssueUpdateView(
             else:
                 # Move under new parent
                 self.object.move(new_parent, pos="last-child")
+
+        apply_epic_assignees(form, self.object, actor=self.request.user)
 
         notify_assignment(
             self.object,
@@ -1253,6 +1287,9 @@ class EpicDetailInlineEditView(LoginAndWorkspaceRequiredMixin, IssueViewMixin, V
             "milestone": epic.get_parent(),
             "status_choices": IssueStatus.choices,
             "priority_choices": IssuePriority.choices,
+            # Everyone notified about this epic, which the header shows and the
+            # multi-select pre-fills. One query, and only on this view.
+            "epic_assignees": [assignment.user for assignment in epic.assignments.select_related("user")],
         }
         if form:
             context["form"] = form
@@ -1282,6 +1319,7 @@ class EpicDetailInlineEditView(LoginAndWorkspaceRequiredMixin, IssueViewMixin, V
                 "priority": epic.priority,
                 "assignee": epic.assignee,
                 "due_date": epic.due_date,
+                "assignees": list(epic.assignments.values_list("user_id", flat=True)),
             },
             workspace_members=request.workspace_members,
         )
@@ -1320,6 +1358,11 @@ class EpicDetailInlineEditView(LoginAndWorkspaceRequiredMixin, IssueViewMixin, V
             epic.due_date = form.cleaned_data.get("due_date")
             epic.save()
 
+            apply_epic_assignees(form, epic, actor=request.user)
+            # Rebuilt after the write so the returned header shows what was just
+            # saved rather than the pre-edit set.
+            context["epic_assignees"] = [a.user for a in epic.assignments.select_related("user")]
+
             notify_assignment(
                 epic,
                 new_assignee=epic.assignee,
@@ -1331,8 +1374,16 @@ class EpicDetailInlineEditView(LoginAndWorkspaceRequiredMixin, IssueViewMixin, V
             # its own subject instead.
             notify_epic_changed(epic, changes=diff(before, epic), actor=request.user)
 
+            messages.success(request, _("Epic updated successfully."))
+
             # Return display mode
             response = render(request, display_template, context)
+
+            # The header is swapped in place, so the toast has to be delivered
+            # out of band: without this the message is queued but nothing on the
+            # page ever renders it, and it would surface on the *next* full page
+            # load instead - long after the save it refers to.
+            response = _attach_messages_toast(request, response)
 
             # Check cascade opportunities if status changed
             new_status = form.cleaned_data["status"]

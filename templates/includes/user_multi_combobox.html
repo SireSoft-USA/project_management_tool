@@ -1,0 +1,124 @@
+{% load i18n %}
+{# Reusable Alpine.js multi-select combobox for user selection (epic assignees). #}
+{# Mirrors includes/user_combobox.html, but keeps a list of selections rather than one. #}
+{# Required: combobox_name, combobox_members (queryset) #}
+{# Optional: combobox_selected (queryset/list of users), combobox_size ("sm" for rows/headers), combobox_max #}
+{# Each selection posts its own <input name="{{ combobox_name }}">, which is what #}
+{# Django's ModelMultipleChoiceField reads via request.POST.getlist(). #}
+<div class="relative"
+     x-data="{
+       open: false,
+       search: '',
+       max: {{ combobox_max|default:25 }},
+       activeIndex: -1,
+       selected: [
+         {% for member in combobox_selected %}
+         { value: '{{ member.pk }}', label: '{{ member.get_display_name|escapejs }}', initials: '{{ member.get_display_name|slice:":2"|upper }}' }{% if not forloop.last %},{% endif %}
+         {% endfor %}
+       ],
+       options: [
+         {% for member in combobox_members %}
+         { value: '{{ member.pk }}', label: '{{ member.get_display_name|escapejs }}', initials: '{{ member.get_display_name|slice:":2"|upper }}' }{% if not forloop.last %},{% endif %}
+         {% endfor %}
+       ],
+       get filtered() {
+         if (!this.search.trim()) return this.options;
+         const s = this.search.toLowerCase();
+         return this.options.filter(o => o.label.toLowerCase().includes(s));
+       },
+       isSelected(opt) {
+         return this.selected.some(s => s.value === opt.value);
+       },
+       get atLimit() {
+         return this.selected.length >= this.max;
+       },
+       toggleOption(opt) {
+         if (this.isSelected(opt)) {
+           this.selected = this.selected.filter(s => s.value !== opt.value);
+         } else if (!this.atLimit) {
+           this.selected = [...this.selected, opt];
+         }
+         this.search = '';
+       },
+       remove(value) {
+         this.selected = this.selected.filter(s => s.value !== value);
+       },
+       clear() {
+         this.selected = [];
+         this.open = false;
+         this.search = '';
+         this.activeIndex = -1;
+       },
+       toggle() {
+         this.open = !this.open;
+         if (this.open) this.$nextTick(() => this.$refs.searchInput.focus());
+       }
+     }"
+     @click.outside="open = false; search = ''"
+     @keydown.enter.stop
+     @keydown.escape="if (open) { $event.stopPropagation(); $event.preventDefault(); open = false; search = ''; }">
+  {# One hidden input per selection: getlist() on the server sees them all. #}
+  <template x-for="item in selected" :key="item.value">
+    <input type="hidden" name="{{ combobox_name }}" :value="item.value">
+  </template>
+
+  <button type="button"
+          @click="toggle()"
+          x-ref="trigger"
+          :aria-expanded="open"
+          class="input input-bordered w-full flex items-center gap-1 cursor-pointer h-auto min-h-10 flex-wrap py-1 {% if combobox_size == 'sm' %}input-sm{% endif %}">
+    <template x-for="item in selected" :key="item.value">
+      <span class="badge badge-ghost gap-1 shrink-0">
+        <span x-text="item.label"></span>
+        <span role="button"
+              tabindex="0"
+              class="cursor-pointer opacity-60 hover:opacity-100"
+              @click.stop="remove(item.value)"
+              @keydown.enter.stop.prevent="remove(item.value)">
+          <i class="fa fa-xmark text-xs"></i>
+        </span>
+      </span>
+    </template>
+    <span x-show="selected.length === 0" class="text-base-content/40 flex-1 text-left">&mdash;</span>
+    <i class="fa fa-chevron-down text-xs opacity-50 shrink-0 ml-auto"></i>
+  </button>
+
+  <div x-show="open"
+       x-transition
+       class="absolute z-50 mt-1 w-full min-w-48 bg-base-100 border border-base-content/20 rounded-lg shadow-lg overflow-hidden">
+    <div class="p-2">
+      <input type="text"
+             x-model="search"
+             x-ref="searchInput"
+             placeholder="{% translate 'Search...' %}"
+             class="input input-sm input-bordered w-full"
+             @keydown.down.prevent="activeIndex = Math.min(activeIndex + 1, filtered.length - 1)"
+             @keydown.up.prevent="activeIndex = Math.max(activeIndex - 1, 0)"
+             @keydown.enter.prevent="if (activeIndex >= 0 && activeIndex < filtered.length) toggleOption(filtered[activeIndex])"
+             @keydown.escape.prevent="open = false; search = ''; $refs.trigger.focus()">
+    </div>
+    <div x-show="atLimit" class="px-3 pb-1 text-xs text-warning">
+      {% blocktranslate trimmed %}Maximum number of assignees reached.{% endblocktranslate %}
+    </div>
+    <div class="overflow-y-auto max-h-48">
+      <button type="button"
+              @click="clear()"
+              class="flex items-center gap-2 w-full px-3 py-1.5 text-sm hover:bg-base-200">
+        <span class="w-6 h-6"></span>
+        <span class="text-base-content/50">{% translate "Clear all" %}</span>
+      </button>
+      <template x-for="(opt, idx) in filtered" :key="opt.value">
+        <button type="button"
+                @click="toggleOption(opt)"
+                @mouseenter="activeIndex = idx"
+                class="flex items-center gap-2 w-full px-3 py-1.5 text-sm hover:bg-base-200"
+                :class="{ 'bg-base-200': activeIndex === idx, 'opacity-40': atLimit && !isSelected(opt) }">
+          <span class="w-6 h-6 rounded-full bg-primary/10 text-primary text-xs flex items-center justify-center font-semibold shrink-0"
+                x-text="opt.initials"></span>
+          <span x-text="opt.label" class="truncate"></span>
+          <i x-show="isSelected(opt)" class="fa fa-check ml-auto text-success text-xs shrink-0"></i>
+        </button>
+      </template>
+    </div>
+  </div>
+</div>

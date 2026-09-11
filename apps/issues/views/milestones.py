@@ -11,6 +11,7 @@ from django.utils.translation import gettext_lazy as _
 from django.views.generic import CreateView, DeleteView, DetailView, ListView, UpdateView, View
 
 from apps.issues.cascade import build_cascade_oob_response, build_cascade_retarget_response
+from apps.issues.assignments import apply_epic_assignees
 from apps.issues.forms import (
     EpicForm,
     MilestoneDetailInlineEditForm,
@@ -497,6 +498,9 @@ class MilestoneEpicCreateView(MilestoneViewMixin, LoginAndWorkspaceRequiredMixin
         obj.key = obj._generate_unique_key()
         # Add epic as a child of the milestone
         self.milestone.add_child(instance=obj)
+
+        # Only reachable once the epic has a primary key.
+        apply_epic_assignees(form, obj, actor=self.request.user)
 
         messages.success(self.request, _("Epic created successfully."))
 
