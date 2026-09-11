@@ -341,6 +341,30 @@ bash-db:
     docker compose exec db bash
 
 # =============================================================================
+# Production Deployment (nginx + Let's Encrypt, docker-compose.prod.yml)
+# =============================================================================
+
+# Build and start the production stack (nginx on 80/443 + gunicorn + celery)
+[doc("Start the production stack (nginx + SSL)")]
+prod-up:
+    docker compose -f docker-compose.prod.yml up -d --build
+
+# Stop the production stack
+[doc("Stop the production stack")]
+prod-down:
+    docker compose -f docker-compose.prod.yml down
+
+# Follow logs from the production stack
+[doc("Follow logs from the production stack")]
+prod-logs:
+    docker compose -f docker-compose.prod.yml logs -f
+
+# One-time Let's Encrypt certificate issuance for DOMAIN (run after prod-up)
+[doc("Issue the first Let's Encrypt certificate for DOMAIN")]
+prod-init-ssl:
+    ./docker/nginx/init-letsencrypt.sh
+
+# =============================================================================
 # Cleanup
 # =============================================================================
 
