@@ -66,13 +66,13 @@
             logo_url is the fallback for when embedding failed.
           {% endcomment %}
           {% if logo_cid or logo_url %}
-            <img src="{% if logo_cid %}cid:{{ logo_cid }}{% else %}{{ logo_url }}{% endif %}" alt="Siresoft" height="40" style="height: 40px; width: auto; max-width: 200px; border: 0; display: block; outline: none; text-decoration: none;">
+            <img src="{% if logo_cid %}cid:{{ logo_cid }}{% else %}{{ logo_url }}{% endif %}" alt="SireSoft" height="40" style="height: 40px; width: auto; max-width: 200px; border: 0; display: block; outline: none; text-decoration: none;">
           {% else %}
-            <span style="font-size: 24px; font-weight: 700; color: #8fb8f0; letter-spacing: -0.5px;">{{ current_site.name|default:"Siresoft" }}</span>
+            <span style="font-size: 24px; font-weight: 700; color: #8fb8f0; letter-spacing: -0.5px;">{{ current_site.name|default:"SireSoft" }}</span>
           {% endif %}
         </td>
         <td align="right" valign="middle" style="padding: 20px 24px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
-          <span style="font-size: 16px; font-weight: 600; color: #8fb8f0; letter-spacing: -0.2px;">{% translate "Siresoft Project Management Tool" %}</span>
+          <span style="font-size: 16px; font-weight: 600; color: #8fb8f0; letter-spacing: -0.2px;">{% translate "SireSoft Project Management Tool" %}</span>
         </td>
       </tr>
     </table>
