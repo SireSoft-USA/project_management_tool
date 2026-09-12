@@ -465,10 +465,13 @@ class ProjectRowInlineEditView(LoginAndWorkspaceRequiredMixin, WorkspaceAdminFor
         form = ProjectRowInlineEditForm(
             initial={
                 "name": project.name,
+                "key": project.key,
                 "status": project.status,
                 "lead": project.lead,
             },
+            workspace=self.workspace,
             workspace_members=request.workspace_members,
+            instance=project,
         )
         context["form"] = form
         return render(request, edit_template, context)
@@ -479,7 +482,12 @@ class ProjectRowInlineEditView(LoginAndWorkspaceRequiredMixin, WorkspaceAdminFor
             Project.objects.for_workspace(self.workspace).select_related("lead"),
             key=kwargs["key"],
         )
-        form = ProjectRowInlineEditForm(request.POST, workspace_members=request.workspace_members)
+        form = ProjectRowInlineEditForm(
+            request.POST,
+            workspace=self.workspace,
+            workspace_members=request.workspace_members,
+            instance=project,
+        )
         context = self._get_context(request, project, form)
 
         display_template = "projects/includes/project_row.html"
@@ -490,6 +498,7 @@ class ProjectRowInlineEditView(LoginAndWorkspaceRequiredMixin, WorkspaceAdminFor
 
             # Update project fields
             project.name = form.cleaned_data["name"]
+            project.key = form.cleaned_data["key"]
             project.status = form.cleaned_data["status"]
             project.lead = form.cleaned_data.get("lead")
             project.save()
@@ -544,11 +553,14 @@ class ProjectDetailInlineEditView(
         form = ProjectDetailInlineEditForm(
             initial={
                 "name": project.name,
+                "key": project.key,
                 "description": project.description,
                 "status": project.status,
                 "lead": project.lead,
             },
+            workspace=self.workspace,
             workspace_members=request.workspace_members,
+            instance=project,
         )
         context["form"] = form
         return render(request, edit_template, context)
@@ -561,7 +573,9 @@ class ProjectDetailInlineEditView(
         )
         form = ProjectDetailInlineEditForm(
             request.POST,
+            workspace=self.workspace,
             workspace_members=request.workspace_members,
+            instance=project,
         )
         context = self._get_context(request, project, form)
 
@@ -570,13 +584,18 @@ class ProjectDetailInlineEditView(
 
         if form.is_valid():
             old_status = project.status
+            old_key = project.key
 
             # Update project fields
             project.name = form.cleaned_data["name"]
+            project.key = form.cleaned_data["key"]
             project.description = form.cleaned_data.get("description") or ""
             project.status = form.cleaned_data["status"]
             project.lead = form.cleaned_data.get("lead")
             project.save()
+
+            if old_key != project.key:
+                return HttpResponseClientRedirect(project.get_absolute_url())
 
             # Return display mode
             response = render(request, display_template, context)

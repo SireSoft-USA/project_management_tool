@@ -121,11 +121,26 @@ class Project(StatusTransitionMixin, BaseModel):
         return self.name
 
     def save(self, *args, **kwargs):
+        old_key = None
+        if self.pk:
+            old_key = type(self).objects.filter(pk=self.pk).values_list("key", flat=True).first()
+
         if self.key:
             self.key = self.key.strip().upper()
         else:
             self.key = self._generate_unique_key()
-        super().save(*args, **kwargs)
+
+        with transaction.atomic():
+            super().save(*args, **kwargs)
+            if old_key and old_key != self.key:
+                self._rewrite_issue_keys(old_key, self.key)
+
+    def _rewrite_issue_keys(self, old_key: str, new_key: str) -> None:
+        """Rewrite issue keys when the project key changes (format: {PROJECT_KEY}-{N})."""
+        BaseIssue = apps.get_model("issues", "BaseIssue")
+        BaseIssue.objects.filter(project=self).update(
+            key=Func(F("key"), Value(f"{old_key}-"), Value(f"{new_key}-"), function="REPLACE")
+        )
 
     def _generate_unique_key(self) -> str:
         """
@@ -199,7 +214,6 @@ class Project(StatusTransitionMixin, BaseModel):
         - All issue keys (format: {PROJECT_KEY}-{N}) are updated if the key changes.
         - Sprint assignments are removed from all work items (sprints are workspace-scoped).
         """
-        BaseIssue = apps.get_model("issues", "BaseIssue")
         Story = apps.get_model("issues", "Story")
         Bug = apps.get_model("issues", "Bug")
         Chore = apps.get_model("issues", "Chore")
@@ -218,11 +232,6 @@ class Project(StatusTransitionMixin, BaseModel):
                 self.workspace = original_workspace
             else:
                 new_key = old_key
-
-            if old_key != new_key:
-                BaseIssue.objects.filter(project=self).update(
-                    key=Func(F("key"), Value(f"{old_key}-"), Value(f"{new_key}-"), function="REPLACE")
-                )
 
             Story.objects.filter(project=self).update(sprint=None)
             Bug.objects.filter(project=self).update(sprint=None)

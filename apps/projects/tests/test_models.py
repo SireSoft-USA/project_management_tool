@@ -122,6 +122,40 @@ class ProjectKeyNormalizationTest(TestCase):
         self.assertEqual("CUSTOM", project.key)
 
 
+class ProjectKeyRenameTest(TestCase):
+    """Tests for rewriting issue keys when a project key is changed."""
+
+    def test_renaming_project_key_updates_issue_keys(self):
+        workspace = WorkspaceFactory()
+        project = ProjectFactory(workspace=workspace, key="OLD")
+        epic = EpicFactory(project=project)
+        story = StoryFactory(project=project)
+
+        self.assertTrue(epic.key.startswith("OLD-"))
+        self.assertTrue(story.key.startswith("OLD-"))
+
+        project.key = "NEW"
+        project.save()
+
+        epic.refresh_from_db()
+        story.refresh_from_db()
+        self.assertTrue(epic.key.startswith("NEW-"))
+        self.assertTrue(story.key.startswith("NEW-"))
+        self.assertFalse(epic.key.startswith("OLD-"))
+
+    def test_unchanged_project_key_leaves_issue_keys(self):
+        workspace = WorkspaceFactory()
+        project = ProjectFactory(workspace=workspace, key="SAME")
+        story = StoryFactory(project=project)
+        original_key = story.key
+
+        project.name = "Renamed"
+        project.save()
+
+        story.refresh_from_db()
+        self.assertEqual(original_key, story.key)
+
+
 class ProjectMoveTest(TestCase):
     """Tests for Project.move(target_workspace)."""
 

@@ -1,0 +1,113 @@
+# Same project name as docker-compose.yml (dev) on purpose: if this stack
+# replaces an already-running dev stack on the same server, `postgres_data`
+# and `redis_data` resolve to the SAME Docker volumes the dev stack was
+# using, so the existing database and Redis data carry over untouched.
+name: matorral
+
+# Production stack: nginx terminates TLS on 80/443 and reverse-proxies to
+# Gunicorn. Bring up with:
+#   docker compose -f docker-compose.prod.yml up -d --build
+# Then, once (per environment), issue the Let's Encrypt certificate:
+#   ./docker/nginx/init-letsencrypt.sh
+# Requires DOMAIN and CERTBOT_EMAIL in .env, and DOMAIN's DNS already
+# pointing at this host (port 80 must be reachable for the ACME challenge).
+
+services:
+  db:
+    image: postgres:17
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-matorral}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    healthcheck:
+      test: pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}
+      interval: 2s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: bash -c 'exec 6<>/dev/tcp/redis/6379'
+      interval: 2s
+      retries: 10
+    restart: unless-stopped
+
+  django:
+    build:
+      context: .
+      dockerfile: docker/django/Dockerfile
+    # Runs migrations before gunicorn on every start/redeploy (see docker/startup.sh).
+    command: ./docker/startup.sh
+    volumes:
+      - ./media:/code/media
+    env_file:
+      - ./.env
+    environment:
+      - DJANGO_SETTINGS_MODULE=matorral.settings.production
+    expose:
+      - "8080"
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery:
+    build:
+      context: .
+      dockerfile: docker/django/Dockerfile
+    command: celery -A matorral worker -l INFO --beat --pool=prefork --concurrency=2
+    volumes:
+      - ./media:/code/media
+    env_file:
+      - ./.env
+    environment:
+      - DJANGO_SETTINGS_MODULE=matorral.settings.production
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  nginx:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./docker/nginx/templates:/etc/nginx/templates:ro
+      - certbot_conf:/etc/letsencrypt:ro
+      - certbot_www:/var/www/certbot:ro
+      - ./media:/media:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN:?Set DOMAIN in .env}
+    # Reload periodically so certbot's renewed certificate gets picked up
+    # (nginx only reads certs from disk at start/reload, not on every request).
+    command: >
+      /bin/sh -c "while :; do sleep 12h & wait $${!}; nginx -s reload; done & nginx -g 'daemon off;'"
+    restart: unless-stopped
+    depends_on:
+      - django
+
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - certbot_conf:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+    entrypoint: >
+      /bin/sh -c "trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  certbot_conf:
+  certbot_www:

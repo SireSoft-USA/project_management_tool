@@ -681,6 +681,7 @@ class ProjectRowInlineEditViewTest(ProjectViewTestCase):
             self._get_inline_edit_url(project),
             {
                 "name": "Updated Name",
+                "key": project.key,
                 "status": project.status,
             },
         )
@@ -697,6 +698,7 @@ class ProjectRowInlineEditViewTest(ProjectViewTestCase):
             self._get_inline_edit_url(project),
             {
                 "name": project.name,
+                "key": project.key,
                 "status": ProjectStatus.ACTIVE,
             },
         )
@@ -713,6 +715,7 @@ class ProjectRowInlineEditViewTest(ProjectViewTestCase):
             self._get_inline_edit_url(project),
             {
                 "name": project.name,
+                "key": project.key,
                 "status": project.status,
                 "lead": self.user.pk,
             },
@@ -730,6 +733,7 @@ class ProjectRowInlineEditViewTest(ProjectViewTestCase):
             self._get_inline_edit_url(project),
             {
                 "name": "",  # Required field
+                "key": project.key,
                 "status": project.status,
             },
         )
@@ -748,6 +752,43 @@ class ProjectRowInlineEditViewTest(ProjectViewTestCase):
         self.assertEqual(200, response.status_code)
         self.assertIn("show_status", response.context)
         self.assertFalse(response.context["show_status"])
+
+    def test_post_updates_project_key(self):
+        """POST updates the project key."""
+        project = ProjectFactory(workspace=self.workspace, key="OLDKEY")
+
+        response = self.client.post(
+            self._get_inline_edit_url(project),
+            {
+                "name": project.name,
+                "key": "NEW1",
+                "status": project.status,
+            },
+        )
+
+        self.assertEqual(200, response.status_code)
+        project.refresh_from_db()
+        self.assertEqual("NEW1", project.key)
+
+    def test_post_duplicate_key_returns_edit_template(self):
+        """POST with a duplicate key returns the edit template with errors."""
+        ProjectFactory(workspace=self.workspace, key="TAKEN")
+        project = ProjectFactory(workspace=self.workspace, key="MINE")
+
+        response = self.client.post(
+            self._get_inline_edit_url(project),
+            {
+                "name": project.name,
+                "key": "TAKEN",
+                "status": project.status,
+            },
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertTemplateUsed(response, "projects/includes/project_row_edit.html")
+        self.assertIn("key", response.context["form"].errors)
+        project.refresh_from_db()
+        self.assertEqual("MINE", project.key)
 
 
 class ProjectDetailInlineEditViewTest(ProjectViewTestCase):
@@ -790,6 +831,7 @@ class ProjectDetailInlineEditViewTest(ProjectViewTestCase):
             self._get_detail_inline_edit_url(project),
             {
                 "name": "Updated Name",
+                "key": project.key,
                 "status": project.status,
             },
         )
@@ -806,6 +848,7 @@ class ProjectDetailInlineEditViewTest(ProjectViewTestCase):
             self._get_detail_inline_edit_url(project),
             {
                 "name": project.name,
+                "key": project.key,
                 "status": project.status,
                 "description": "Updated description",
             },
@@ -823,6 +866,7 @@ class ProjectDetailInlineEditViewTest(ProjectViewTestCase):
             self._get_detail_inline_edit_url(project),
             {
                 "name": project.name,
+                "key": project.key,
                 "status": ProjectStatus.ACTIVE,
             },
         )
@@ -839,6 +883,7 @@ class ProjectDetailInlineEditViewTest(ProjectViewTestCase):
             self._get_detail_inline_edit_url(project),
             {
                 "name": project.name,
+                "key": project.key,
                 "status": project.status,
                 "lead": self.user.pk,
             },
@@ -856,6 +901,7 @@ class ProjectDetailInlineEditViewTest(ProjectViewTestCase):
             self._get_detail_inline_edit_url(project),
             {
                 "name": "",  # Required field
+                "key": project.key,
                 "status": project.status,
             },
         )
@@ -865,8 +911,23 @@ class ProjectDetailInlineEditViewTest(ProjectViewTestCase):
         self.assertIn("form", response.context)
         self.assertTrue(response.context["form"].errors)
 
+    def test_post_updates_project_key_and_redirects(self):
+        """POST with a new key redirects to the project's new URL."""
+        project = ProjectFactory(workspace=self.workspace, key="OLDKEY")
 
-class ProjectBulkMoveViewTest(ProjectViewTestCase):
+        response = self.client.post(
+            self._get_detail_inline_edit_url(project),
+            {
+                "name": project.name,
+                "key": "NEW1",
+                "status": project.status,
+            },
+        )
+
+        self.assertEqual(200, response.status_code)
+        project.refresh_from_db()
+        self.assertEqual("NEW1", project.key)
+        self.assertEqual(project.get_absolute_url(), response.headers.get("HX-Redirect"))
     """Tests for ProjectBulkMoveView functionality."""
 
     def setUp(self):
