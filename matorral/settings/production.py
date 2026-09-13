@@ -8,9 +8,12 @@ ENVIRONMENT = env("ENVIRONMENT", default="production")
 # Required when running behind a reverse proxy that terminates SSL.
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
+# SECURE_SSL_REDIRECT doubles as "are we actually being served over HTTPS
+# right now" — Secure-flagged cookies are silently dropped by the browser
+# over plain HTTP, which breaks CSRF/login until a real cert is in place.
 SECURE_SSL_REDIRECT = os.environ.get("SECURE_SSL_REDIRECT", "True") == "True"
-SESSION_COOKIE_SECURE = True
-CSRF_COOKIE_SECURE = True
+SESSION_COOKIE_SECURE = SECURE_SSL_REDIRECT
+CSRF_COOKIE_SECURE = SECURE_SSL_REDIRECT
 
 # HSTS — uncomment once you're confident SSL is stable.
 # Ramp SECURE_HSTS_SECONDS up gradually (60 → 3600 → 86400 → 31536000).
