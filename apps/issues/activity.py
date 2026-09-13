@@ -1,27 +1,36 @@
 """What counts as meaningful work on an Epic, and how long silence is tolerated.
 
-An Epic is considered inactive when nobody has added a Story to it or done work
-on one of its existing Stories for EPIC_INACTIVITY_ALERT_AFTER. Rather than
-deriving that by scanning Stories on a schedule, callers record activity as it
-happens (see IssueManager.record_story_activity) and the scheduler reads a single
-indexed column.
+An Epic is considered inactive when nobody has added a work item to it or done
+work on one of its existing work items for EPIC_INACTIVITY_ALERT_AFTER. Rather
+than deriving that by scanning children on a schedule, callers record activity as
+it happens (see IssueManager.record_story_activity) and the scheduler reads a
+single indexed column.
 
 That only works if "activity" means the same thing everywhere, so the definition
 lives here rather than being re-decided at each call site.
 
+"Work item" means Story, Bug or Chore — the three types that live *under* an
+Epic. All three count. Fixing bugs under an Epic for a week is work on that
+Epic by any reading a user would recognise, and an earlier version that counted
+only Story reported such Epics inactive while people were actively working on
+them.
+
 Counts as activity (resets the 7-day clock):
-  * A Story is created under the Epic.
-  * A Story under the Epic is edited by a user — title, description, status,
-    priority, points, assignee, or sprint — whether through a single-row edit
-    view or a bulk action.
+  * A Story, Bug or Chore is created under the Epic.
+  * A Story, Bug or Chore under the Epic is edited by a user — title,
+    description, status, priority, points, assignee, or sprint — whether through
+    a single-row edit view or a bulk action.
 
 Does NOT count as activity:
   * Editing the Epic itself (renaming it, reassigning it, changing its status).
-    The requirement is about work on the Epic's Stories, not bookkeeping on the
+    The requirement is about work on the Epic's children, not bookkeeping on the
     Epic. An Epic nobody is progressing should still go stale even if its title
     keeps getting tweaked.
-  * Deleting a Story, or moving one out to a different Epic. Removing work is not
-    progress, and treating it as activity would let an Epic be kept "fresh"
+  * Subtask work. A Subtask belongs to a work item rather than directly to an
+    Epic, and apps.notifications.signals draws the same line for the same
+    reason.
+  * Deleting a work item, or moving one out to a different Epic. Removing work is
+    not progress, and treating it as activity would let an Epic be kept "fresh"
     indefinitely without anything actually being delivered.
   * Anything happening under a different Epic, or under a Milestone directly.
   * System-driven saves that no user initiated (data migrations, backfills,
@@ -64,7 +73,7 @@ def story_parent_path(story) -> str | None:
 
 
 def record_activity_for_issues(issues) -> int:
-    """Record Story activity for the parent Epics of an already-loaded issue list.
+    """Record work-item activity for the parent Epics of an already-loaded issue list.
 
     The bulk views mutate issues with queryset.update(), which never fires
     post_save, so apps.issues.signals cannot see those edits. They call this
@@ -72,8 +81,11 @@ def record_activity_for_issues(issues) -> int:
     and success message), so the parent paths come from objects that are in
     memory anyway — no query is spent finding them.
 
-    Non-Story issues in the list are ignored: bulk actions operate on a mixed
-    selection, and only Story work counts toward an Epic's activity.
+    Epics, Milestones and Subtasks in the list are ignored: bulk actions operate
+    on a mixed selection, and only work performed *under* an Epic counts toward
+    its activity. Stories, Bugs and Chores all qualify — the same three types the
+    signal path registers, so a bulk edit and a single edit agree about what
+    work is.
 
     Args:
         issues: An iterable of already-loaded BaseIssue instances.
@@ -83,15 +95,15 @@ def record_activity_for_issues(issues) -> int:
     """
     # Imported here rather than at module scope: models.py imports this module,
     # so a top-level import would be circular.
-    from apps.issues.models import BaseIssue, Story  # noqa: PLC0415
+    from apps.issues.models import BaseIssue, Bug, Chore, Story  # noqa: PLC0415
     from apps.issues.utils import get_cached_content_type  # noqa: PLC0415
 
     # Compared by content type id rather than get_real_instance(), which costs a
     # query per object when the caller loaded rows non-polymorphically. The
-    # content type is process-cached, so this stays free regardless of list size.
-    story_ctype_id = get_cached_content_type(Story).id
+    # content types are process-cached, so this stays free regardless of list size.
+    work_item_ctype_ids = {get_cached_content_type(model).id for model in (Story, Bug, Chore)}
 
-    parent_paths = {story_parent_path(issue) for issue in issues if issue.polymorphic_ctype_id == story_ctype_id}
+    parent_paths = {story_parent_path(issue) for issue in issues if issue.polymorphic_ctype_id in work_item_ctype_ids}
     parent_paths.discard(None)
 
     return BaseIssue.objects.record_story_activity_by_parent_path(parent_paths)

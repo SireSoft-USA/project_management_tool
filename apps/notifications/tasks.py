@@ -100,6 +100,14 @@ def send_epic_inactivity_email(epic_id: int, recipient_id: int, inactive_days: i
     Epic.objects.claim_inactivity_alert), so a retry after a transport failure
     re-sends the same alert rather than a duplicate one — the claim is what
     prevents duplicates, not this task.
+
+    The epic's status is re-checked here, at the last moment before the message
+    is built. The sweep already declines a finished epic, but it does so when it
+    *queues* this task; the worker picks the task up some time later, and a retry
+    may run minutes after that. An epic completed anywhere in that window would
+    otherwise still be mailed about - telling somebody that work they have just
+    closed looks abandoned. The epic row is loaded here anyway, so the check
+    costs nothing beyond the comparison.
     """
     Epic = apps.get_model("issues", "Epic")
     User = apps.get_model("users", "User")
@@ -107,6 +115,14 @@ def send_epic_inactivity_email(epic_id: int, recipient_id: int, inactive_days: i
     epic = _get(Epic.objects.select_related("project", "project__workspace"), epic_id, label="epic")
     recipient = _get(User, recipient_id, label="recipient")
     if epic is None or recipient is None:
+        return False
+
+    if epic.is_finished():
+        logger.info(
+            "Epic inactivity email skipped: epic %s reached status %s before delivery",
+            epic_id,
+            epic.status,
+        )
         return False
 
     return send_notification(

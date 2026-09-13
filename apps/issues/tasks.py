@@ -5,7 +5,7 @@ import logging
 from django.utils import timezone
 
 from apps.issues.activity import EPIC_INACTIVITY_ALERT_AFTER
-from apps.issues.models import Epic
+from apps.issues.models import STATUS_CATEGORIES, Epic
 from apps.notifications.services import notify_epic_inactivity
 
 from celery import shared_task
@@ -16,6 +16,11 @@ logger = logging.getLogger(__name__)
 # memory flat if a large number of epics fall due at once (e.g. the first run
 # after this feature ships, or after a long outage).
 BATCH_SIZE = 100
+
+# Statuses that mean the work is over. Derived from the same mapping the models
+# use rather than listed by hand, so a new terminal status cannot be added to the
+# app and silently start generating "no activity" mail about finished epics.
+TERMINAL_STATUSES = [status for status, category in STATUS_CATEGORIES.items() if category == "done"]
 
 
 @shared_task
@@ -33,6 +38,14 @@ def send_epic_inactivity_alerts() -> int:
     real work — a Story saved a moment earlier has already pushed the due date
     into the future, so the claim fails and no stale alert goes out.
 
+    Finished epics are filtered out twice, and both are load-bearing. The sweep
+    query excludes them, which handles an epic that was already done when the run
+    began. But rows stream in chunks of BATCH_SIZE, so that filter was evaluated
+    when a row's *chunk* was fetched — possibly hundreds of rows ago. An epic
+    completed while the sweep is still running therefore arrives in the loop
+    carrying its pre-completion status, and is caught by the re-read after the
+    claim instead.
+
     Returns:
         The number of alerts queued, for logging and monitoring.
     """
@@ -49,6 +62,23 @@ def send_epic_inactivity_alerts() -> int:
     for epic in candidates.iterator(chunk_size=BATCH_SIZE):
         if not Epic.objects.claim_inactivity_alert(epic.pk, now=now):
             # Someone else took it, or activity landed in the meantime.
+            skipped += 1
+            continue
+
+        # The status filter was applied when this row's chunk was fetched, which
+        # may have been many rows ago: iterator() streams in batches of
+        # BATCH_SIZE, so an epic finished *during* the sweep still arrives here
+        # carrying its pre-completion status. Re-reading it after the claim is
+        # what stops "no activity" mail going out about work that is now done -
+        # the single most confusing alert a user can receive, because by the time
+        # it lands the epic they just closed looks abandoned.
+        #
+        # Deliberately after the claim rather than before: the claim has already
+        # cleared the due date, so a finished epic drops out of every future
+        # sweep as well. Checking first and skipping would leave the stale date
+        # armed and re-offer the same epic every hour.
+        if Epic.objects.filter(pk=epic.pk, status__in=TERMINAL_STATUSES).exists():
+            logger.info("Epic inactivity alert abandoned: epic %s was finished during the sweep", epic.pk)
             skipped += 1
             continue
 

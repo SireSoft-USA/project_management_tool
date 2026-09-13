@@ -3,8 +3,12 @@
 Bulk views mutate rows with queryset.update(), which never fires post_save, so
 apps.issues.signals cannot see those edits. Each such view calls
 record_activity_for_issues() explicitly instead. If that call is ever dropped, an
-Epic whose Stories are being worked on in bulk would be wrongly reported
+Epic whose work items are being worked on in bulk would be wrongly reported
 inactive — these tests are the guard against that going unnoticed.
+
+"Work item" is Story, Bug or Chore. All three count, and each is asserted
+separately: they are distinct models behind a content-type filter, so a type
+that was never wired up would otherwise fail silently.
 """
 
 from datetime import timedelta
@@ -17,7 +21,7 @@ from django.utils import timezone
 
 from apps.issues.activity import EPIC_INACTIVITY_ALERT_AFTER
 from apps.issues.cascade import _apply_cascade_down
-from apps.issues.factories import BugFactory, EpicFactory, MilestoneFactory, StoryFactory
+from apps.issues.factories import BugFactory, ChoreFactory, EpicFactory, MilestoneFactory, StoryFactory
 from apps.issues.models import Epic, IssueStatus
 from apps.projects.factories import ProjectFactory
 from apps.sprints.factories import SprintFactory
@@ -95,16 +99,54 @@ class BulkStatusActivityTest(BulkActivityTestBase):
         self.assertClockReset(first)
         self.assertClockReset(second)
 
-    def test_bulk_status_change_on_a_bug_does_not_reset_the_clock(self):
-        """Only Story work counts toward Epic activity, per apps.issues.activity."""
+    def test_bulk_status_change_on_a_bug_resets_the_clock(self):
+        """Bugs are work under the Epic, so bulk-editing them is activity.
+
+        This previously asserted the opposite, reading "Story" in the requirement
+        literally. That made a team who spent a week closing bugs under an Epic
+        receive a "no activity for 7 days" alert about it - and it disagreed with
+        apps.notifications.signals, which had always treated Story, Bug and Chore
+        alike as work items. Both paths now use the same definition; see
+        apps.issues.activity for it.
+        """
         epic = self._stale_epic()
         bug = BugFactory(project=self.project, parent=epic)
         self._expire(epic)
-        due_at_before = epic.inactivity_alert_due_at
 
         self._post("workspace_issues_bulk_status", {"issues": [bug.key], "status": IssueStatus.IN_PROGRESS})
 
-        self.assertClockUnchanged(epic, due_at_before)
+        self.assertClockReset(epic)
+
+    def test_bulk_status_change_on_a_chore_resets_the_clock(self):
+        """The third work-item type, asserted explicitly rather than assumed to
+        follow from the Bug case - they are separate models and separate
+        registrations, so only a test proves both are wired."""
+        epic = self._stale_epic()
+        chore = ChoreFactory(project=self.project, parent=epic)
+        self._expire(epic)
+
+        self._post("workspace_issues_bulk_status", {"issues": [chore.key], "status": IssueStatus.IN_PROGRESS})
+
+        self.assertClockReset(epic)
+
+    def test_bulk_status_change_on_a_mixed_selection_resets_the_clock(self):
+        """The realistic bulk action: a selection spanning all three types.
+
+        record_activity_for_issues() filters by content type, so a mixed list is
+        exactly where a missing type would slip through unnoticed.
+        """
+        epic = self._stale_epic()
+        story = StoryFactory(project=self.project, parent=epic)
+        bug = BugFactory(project=self.project, parent=epic)
+        chore = ChoreFactory(project=self.project, parent=epic)
+        self._expire(epic)
+
+        self._post(
+            "workspace_issues_bulk_status",
+            {"issues": [story.key, bug.key, chore.key], "status": IssueStatus.IN_PROGRESS},
+        )
+
+        self.assertClockReset(epic)
 
     def test_bulk_status_change_does_not_revive_a_done_epic(self):
         epic = self._stale_epic(status=IssueStatus.DONE)

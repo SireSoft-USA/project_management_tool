@@ -16,11 +16,12 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from apps.issues.factories import EpicFactory
-from apps.issues.models import Epic
+from apps.issues.models import Epic, IssueStatus
 from apps.notifications.dispatch import build_epic_inactivity_message
 from apps.notifications.emails import send_notification
 from apps.notifications.models import NotificationKind, NotificationPreference
 from apps.notifications.services import notify_epic_inactivity
+from apps.notifications.tasks import send_epic_inactivity_email
 from apps.projects.factories import ProjectFactory
 from apps.users.factories import UserFactory
 from apps.workspaces.factories import MembershipFactory, WorkspaceFactory
@@ -235,3 +236,76 @@ class EpicInactivityOptOutTest(TestCase):
         preference.refresh_from_db()
         self.assertFalse(preference.notify_on_epic_inactivity)
         self.assertFalse(self._send())
+
+
+class EpicFinishedBeforeDeliveryTest(TestCase):
+    """The epic is completed between the sweep queueing this task and the worker running it.
+
+    The sweep declines a finished epic, but it decides that when it *queues* the
+    task. In production the worker picks the task up some time later, and a
+    transport retry may run minutes after that. An epic completed anywhere in
+    that window used to be mailed about regardless - the alert arrived saying
+    work the user had just closed looked abandoned, which is the exact complaint
+    this whole feature area exists to avoid.
+
+    The task re-reads the epic anyway in order to render the message, so the
+    status check that closes this window is free.
+    """
+
+    def setUp(self):
+        self.workspace = WorkspaceFactory()
+        self.project = ProjectFactory(workspace=self.workspace)
+        self.assignee = UserFactory(email="owner@siresoft.com")
+        MembershipFactory(workspace=self.workspace, user=self.assignee)
+
+    def _epic(self, status):
+        return EpicFactory(project=self.project, assignee=self.assignee, status=status)
+
+    def test_no_email_when_the_epic_finished_before_the_task_ran(self):
+        """The regression. Queued while open, executed after completion."""
+        epic = self._epic(IssueStatus.IN_PROGRESS)
+        # Completed after the sweep queued the task. queryset.update() so the
+        # write does not clear the due date and mask what is being tested.
+        Epic.objects.filter(pk=epic.pk).update(status=IssueStatus.DONE)
+
+        sent = send_epic_inactivity_email(epic.pk, self.assignee.pk, 8)
+
+        self.assertFalse(sent)
+        self.assertEqual([], mail.outbox)
+
+    def test_every_terminal_status_stops_delivery(self):
+        """Done is not the only way work ends; Won't Do and Archived are equally
+        finished, and a guard that knew only DONE would still mail about an
+        abandoned epic."""
+        for status in (IssueStatus.DONE, IssueStatus.WONT_DO, IssueStatus.ARCHIVED):
+            with self.subTest(status=status):
+                mail.outbox = []
+                epic = self._epic(IssueStatus.IN_PROGRESS)
+                Epic.objects.filter(pk=epic.pk).update(status=status)
+
+                sent = send_epic_inactivity_email(epic.pk, self.assignee.pk, 8)
+
+                self.assertFalse(sent)
+                self.assertEqual([], mail.outbox)
+
+    def test_an_open_epic_is_still_delivered(self):
+        """The guard must not over-fire. Without this, suppressing every alert
+        would pass the rest of this class."""
+        epic = self._epic(IssueStatus.IN_PROGRESS)
+
+        sent = send_epic_inactivity_email(epic.pk, self.assignee.pk, 8)
+
+        self.assertTrue(sent)
+        self.assertEqual(1, len(mail.outbox))
+        self.assertIn(self.assignee.email, mail.outbox[0].to)
+
+    def test_a_blocked_epic_is_still_delivered(self):
+        """Blocked is not finished - it is the state that most needs chasing, so
+        a guard keyed on "not in progress" rather than "finished" would wrongly
+        silence exactly the epics worth alerting on."""
+        epic = self._epic(IssueStatus.BLOCKED)
+
+        sent = send_epic_inactivity_email(epic.pk, self.assignee.pk, 8)
+
+        self.assertTrue(sent)
+        self.assertEqual(1, len(mail.outbox))

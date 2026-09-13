@@ -1,17 +1,26 @@
 """Signal handlers for Epic bookkeeping.
 
-Two things are kept up to date here: an Epic's inactivity clock (from Story
+Two things are kept up to date here: an Epic's inactivity clock (from work-item
 activity) and its assignment rows (mirroring the primary assignee).
 
-Stories are created and edited from many views across the issues app (project-
-scoped create, epic-scoped create, clone, the update form, and three different
-inline-edit endpoints). Wiring each one individually would be fragile — a new
-view would silently stop resetting the clock, and an Epic would be reported
+Work items are created and edited from many views across the issues app
+(project-scoped create, epic-scoped create, clone, the update form, and three
+different inline-edit endpoints). Wiring each one individually would be fragile —
+a new view would silently stop resetting the clock, and an Epic would be reported
 inactive while work was actively happening on it. Creation and single-row edits
 both go through Model.save(), so one post_save handler covers them all.
 
+All three work-item types reset the clock, not Story alone. An Epic's children
+are Stories, Bugs and Chores, and a team that spends a week fixing bugs under an
+Epic has demonstrably not abandoned it. Registering only Story meant that work
+was invisible to the clock and the Epic was reported inactive while people were
+actively working on it. BaseIssue is polymorphic, so post_save fires for the
+concrete subclass rather than the base — each type has to be registered
+explicitly, which is why omitting two of them failed silently.
+
 This mirrors the existing apps.notifications.signals module, which solved the
-same "one event, many call sites" problem for assignment email.
+same "one event, many call sites" problem for assignment email, and which
+already treats the same three types as work items.
 
 Bulk actions deliberately do NOT rely on this handler: queryset.update() never
 fires signals, so those views call IssueManager.record_story_activity*()
@@ -22,17 +31,23 @@ place.
 from django.db.models.signals import post_save
 
 from apps.issues.activity import story_parent_path
-from apps.issues.models import Epic, EpicAssignment, Story
+from apps.issues.models import Bug, Chore, Epic, EpicAssignment, Story
+
+# Every issue type whose creation or edit counts as work on its parent Epic.
+# Mirrors apps.notifications.signals.WORK_ITEM_MODELS: the two modules answer the
+# same question ("what is work under an Epic?") and must not drift apart.
+WORK_ITEM_MODELS = (Story, Bug, Chore)
 
 
 def _record_epic_activity(instance, **kwargs):
-    """Push the parent Epic's inactivity clock forward after a Story is saved.
+    """Push the parent Epic's inactivity clock forward after a work item is saved.
 
-    Fires for both creation and edits: adding a Story to an Epic and doing work
-    on an existing one are equally "activity" for inactivity purposes.
+    Fires for both creation and edits, and for all three work-item types: adding
+    a Story, Bug or Chore to an Epic and doing work on an existing one are
+    equally "activity" for inactivity purposes.
 
     Uses the derived parent path rather than get_parent() so this costs one
-    UPDATE and no extra SELECT on the Story save path. A Story with no parent, or
+    UPDATE and no extra SELECT on the save path. A work item with no parent, or
     one parented directly to a Milestone, matches no Epic row and records
     nothing — which is the intended behaviour, not an error.
     """
@@ -74,16 +89,18 @@ def _mirror_primary_assignee(instance, **kwargs):
 def register():
     """Connect the handlers.
 
-    Story activity drives the inactivity clock - only Story counts, because the
-    requirement is specifically about Stories being added to, or worked on
-    within, an Epic. Epic saves keep the assignment rows in step with the primary
-    assignee.
+    Work-item activity drives the inactivity clock. Every concrete work-item type
+    is registered: BaseIssue is polymorphic, so post_save fires for the subclass
+    (Bug, Chore) and never for the base, meaning an unregistered type resets
+    nothing and fails silently. Epic saves keep the assignment rows in step with
+    the primary assignee.
     """
-    post_save.connect(
-        _record_epic_activity,
-        sender=Story,
-        dispatch_uid="issues.epic_activity.story",
-    )
+    for model in WORK_ITEM_MODELS:
+        post_save.connect(
+            _record_epic_activity,
+            sender=model,
+            dispatch_uid=f"issues.epic_activity.{model._meta.model_name}",
+        )
     post_save.connect(
         _mirror_primary_assignee,
         sender=Epic,
@@ -91,4 +108,4 @@ def register():
     )
 
 
-__all__ = ["register"]
+__all__ = ["WORK_ITEM_MODELS", "register"]
