@@ -1,36 +1,19 @@
-# Reverse proxy in front of Gunicorn, terminating TLS for ${DOMAIN}.
-# ${DOMAIN} is substituted by the nginx image's docker-entrypoint (envsubst
-# only replaces variables that exist in the container environment, so nginx's
-# own $host/$scheme/... variables below are left untouched).
+# TEMPORARY HTTP-only config (no SSL yet). Real domain ready hote hi:
+#   cp docker/nginx/templates/app.conf.template.ssl-backup docker/nginx/templates/app.conf.template
+#   (.env mein DOMAIN=asli-domain.com set karo, phir)
+#   docker compose -f docker-compose.prod.yml up -d nginx
+#   ./docker/nginx/init-letsencrypt.sh
 
 server {
     listen 80;
     server_name ${DOMAIN};
 
-    # Let's Encrypt HTTP-01 challenge.
+    client_max_body_size 20M;
+
     location /.well-known/acme-challenge/ {
         root /var/www/certbot;
     }
 
-    location / {
-        return 301 https://$host$request_uri;
-    }
-}
-
-server {
-    listen 443 ssl;
-    http2 on;
-    server_name ${DOMAIN};
-
-    ssl_certificate /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
-    ssl_prefer_server_ciphers on;
-
-    client_max_body_size 20M;
-
-    # User-uploaded media (Django only serves this itself when DEBUG=True).
     location /media/ {
         alias /media/;
     }

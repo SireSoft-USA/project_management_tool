@@ -8,7 +8,7 @@ ENVIRONMENT = env("ENVIRONMENT", default="production")
 # Required when running behind a reverse proxy that terminates SSL.
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
-SECURE_SSL_REDIRECT = True
+SECURE_SSL_REDIRECT = os.environ.get("SECURE_SSL_REDIRECT", "True") == "True"
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
 
