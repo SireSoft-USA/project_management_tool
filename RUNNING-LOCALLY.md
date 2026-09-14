@@ -1,10 +1,9 @@
-# Running Locally (without Docker)
+# Running Locally (Windows-specific notes)
 
-This machine cannot run Docker: **CPU virtualization is disabled in the BIOS/UEFI**,
-so WSL2 (and therefore Docker Desktop) will not start. The documented `just init`
-workflow needs Docker, so this project is set up to run natively instead.
-
-To restore the standard Docker workflow, see "Re-enabling Docker" at the bottom.
+The project runs natively everywhere now (see AGENTS.md / README.md for the
+standard `just` workflow). This file captures Windows-specific quirks hit
+while setting it up on one machine — paths, dependency pins, and a couple of
+one-off fixes — that don't apply on Linux/macOS.
 
 ## What's installed
 
@@ -82,8 +81,8 @@ python -m venv .venv
 
 **1. `DJANGO_VITE_DEV_MODE=False` in `.env`.** This setting defaults to `DEBUG`
 (True), which makes templates emit asset URLs pointing at the Vite dev server on
-`http://localhost:5173`. That server only runs under Docker, so every stylesheet
-and script 404'd and the site rendered as unstyled HTML. With it set to `False`,
+`http://localhost:5173`. That server wasn't running on this machine, so every
+stylesheet and script 404'd and the site rendered as unstyled HTML. With it set to `False`,
 `django-vite` reads `static/.vite/manifest.json` and serves the built bundles
 from `/static/` instead.
 
@@ -102,7 +101,7 @@ no template changes are needed. Because `static/` is gitignored, the real images
 must be shared out-of-band or the ignore rule narrowed to keep `static/images/`
 tracked.
 
-## Limitations without Docker
+## Limitations on this machine
 
 - **No Redis**, so no Celery worker/beat. Everything in the UI works because
   `DEBUG=True` uses a dummy cache, but these background features are inert:
@@ -111,30 +110,8 @@ tracked.
   - **cross-workspace project move** (`apps/projects/tasks.py`) — the UI accepts
     it and returns, but the move never runs.
 
-  To enable these, install Redis (e.g. Memurai for Windows, or `redis-server` in
-  WSL once virtualization is on) and run:
+  To enable these, install Redis (e.g. Memurai for Windows, or WSL's
+  `redis-server`) and run:
   `.venv/Scripts/celery.exe -A matorral worker -l INFO --beat --pool=solo`
 - **Vite dev server** is not running; `static/` holds a production build. Re-run
   `npm run build` after changing anything in `assets/`.
-
-## Re-enabling Docker
-
-1. Reboot into BIOS/UEFI (usually Del / F2 / F10 at boot).
-2. Enable the CPU virtualization option — `Intel VT-x` / `Intel Virtualization
-   Technology`, or `AMD-V` / `SVM Mode`. It is often under Advanced → CPU
-   Configuration.
-3. Save and boot into Windows, then in an **admin** PowerShell:
-   ```powershell
-   wsl --install --no-distribution
-   ```
-   Reboot again if prompted.
-4. Verify: `wsl --status` should succeed, and
-   `(Get-CimInstance Win32_ComputerSystem).HypervisorPresent` should be `True`.
-5. Start Docker Desktop, then use the documented workflow. Before running
-   `just init`, restore the Docker hostnames in `.env`:
-   ```
-   DATABASE_URL="postgresql://postgres:postgres@db:5432/matorral"
-   REDIS_URL="redis://redis:6379"
-   ```
-   **`just init` deletes the existing database**, so back up first if you want to
-   keep the local data.

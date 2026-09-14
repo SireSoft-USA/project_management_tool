@@ -125,17 +125,6 @@ if ENABLE_DEBUG_TOOLBAR:
     MIDDLEWARE.insert(0, "debug_toolbar.middleware.DebugToolbarMiddleware")
     INSTALLED_APPS.append("debug_toolbar")
     INTERNAL_IPS = ["127.0.0.1"]
-    try:
-        import socket
-
-        # Discover the host gateway IP for Docker environments
-        hostname, _, ips = socket.gethostbyname_ex(socket.gethostname())
-        INTERNAL_IPS += [ip[: ip.rfind(".")] + ".1" for ip in ips] + [
-            "192.168.65.1",
-            "10.0.2.2",
-        ]
-    except OSError as e:
-        print(f"{e} while attempting to resolve system hostname. Using INTERNAL_IPS={INTERNAL_IPS}")
 
 if DEBUG:
     INSTALLED_APPS.append("django_browser_reload")

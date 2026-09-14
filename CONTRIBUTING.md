@@ -24,7 +24,8 @@ Bug fixes and improvements to existing behavior are always welcome and generally
 
 ### Requirements
 
-- [Docker](https://docs.docker.com/get-docker/) and Docker Compose
+- PostgreSQL 17, Redis, Node.js
+- [uv](https://docs.astral.sh/uv/) (Python dependency/venv manager)
 - [just](https://github.com/casey/just) command runner
 - [pre-commit](https://pre-commit.com/) (see below)
 
@@ -46,7 +47,7 @@ Copy the example env file and review the values (at minimum, set `SECRET_KEY`):
 cp .env.example .env
 ```
 
-Then run the init command, which builds containers, runs migrations, and seeds the database:
+Then run the init command, which installs dependencies and runs migrations:
 
 ```bash
 just init
@@ -55,9 +56,8 @@ just init
 ### Start the app
 
 ```bash
-just start              # start all containers with logs
+just start              # start Django, Celery and Vite together (foreground)
 just start-detached     # start in background
-just logs               # tail logs
 ```
 
 Open [http://localhost:8000](http://localhost:8000). Create an admin account:
@@ -72,13 +72,13 @@ To stop:
 just stop
 ```
 
-> **Note:** Any change to `pyproject.toml` requires `just requirements` to rebuild the containers.
+> **Note:** Any change to `pyproject.toml` requires `just requirements` (`uv sync`) to refresh the virtualenv.
 
 ---
 
 ## Running Tests
 
-Tests run inside Docker via `just`. Use dotted module paths, not file paths:
+Run tests via `just`. Use dotted module paths, not file paths:
 
 ```bash
 # Run all tests
@@ -103,14 +103,14 @@ just test-cov
 just cov-report
 ```
 
-You can also run tests locally without Docker using `uv`:
+You can also invoke the test runner directly with `uv`:
 
 ```bash
-uv run pytest apps/ -v --tb=short
-uv run pytest apps/issues/ -v
+uv run python manage.py test apps
+uv run python manage.py test apps.issues
 ```
 
-> **Note:** Running locally requires a reachable PostgreSQL instance. The Docker setup is recommended.
+> **Note:** This requires a reachable PostgreSQL instance (see Requirements above).
 
 ---
 

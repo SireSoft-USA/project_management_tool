@@ -15,26 +15,26 @@ Matorral is a Django-based project management tool with workspace-scoped multi-t
 
 ## Development Environment
 
-Requires Docker Compose. `just` is the task runner.
+Runs natively — no Docker. Requires PostgreSQL 17, Redis, Node.js, and `uv` installed locally. `just` is the task runner.
 
 ```bash
-just init               # First-time setup: copy .env, build containers, migrate, seed DB. This will delete the existing DB if it exists!
-just start              # Start all containers with logs
-just start-detached     # Start in background
-just stop               # Stop containers
+just init               # First-time setup: copy .env, create venv, install deps, migrate, seed DB. This will delete the existing DB if it exists!
+just start              # Start Django, Celery and Vite together (foreground)
+just start-detached     # Start the same, in the background
+just stop               # Stop the background processes started by start-detached
 just restart            # Stop + start
 ```
 
-Any change to `pyproject.toml` requires `just requirements` to rebuild containers.
+Any change to `pyproject.toml` requires `just requirements` (`uv sync`) to refresh the virtualenv.
 
 ## Common Commands
 
 ### Environment
 ```bash
 just --list                         # List all recipes with descriptions
-just doctor                         # Verify environment is healthy (.env, containers, migrations)
+just doctor                         # Verify environment is healthy (.env, venv, DB, migrations)
 just check                          # Run all checks (tests, migrations, pre-commit) - CI-friendly
-just status                         # Show status of all containers
+just status                         # Show status of the background dev processes
 ```
 
 ### Django Management
@@ -61,27 +61,22 @@ just fmt                            # Run ruff formatter
 
 ### Frontend
 ```bash
-just npm-build                      # Build frontend assets in container
+just npm-build                      # Build frontend assets
 just npm-type-check                 # Run TypeScript type checker
-npm run dev                         # Watch mode (via Vite dev server, outside Docker)
+just npm-dev                        # Vite dev server, watch mode (foreground)
 ```
 
-### Logs (Service-specific)
-```bash
-just logs                           # All services
-just logs-django                    # Django only
-just logs-db                        # PostgreSQL only
-just logs-celery                    # Celery worker
-just logs-redis                     # Redis
-just logs-vite                      # Vite dev server
-```
+### Logs
+In development, `just start` runs Django/Celery/Vite in the foreground so their
+output is already on screen. In production, services run under systemd —
+see `just prod-logs-django` / `prod-logs-celery` / `prod-logs-nginx` (`journalctl`).
 
 ## Running Tests
 
 Tests use Django's built-in test runner (`manage.py test`). Test data is provided by factories using `factory-boy`.
 
 ```bash
-# Via just (recommended, runs inside Docker)
+# Via just (recommended)
 just test                                        # Run all tests
 just test apps.issues                            # Run all tests in an app
 just test apps.issues.tests.test_models          # Run a specific test module
@@ -612,9 +607,13 @@ Assets live in `assets/`. Built output goes to `static/`.
 
 ## Environment & Services
 
-Services (docker-compose.yml): PostgreSQL 17, Redis, Django web, Vite dev server, Celery worker+beat.
+Native services, installed and managed on the host directly (systemd in production):
+PostgreSQL 17, Redis, Django (Gunicorn), Celery worker+beat, nginx (reverse proxy, plain HTTP).
+Vite is dev-only, used to build/watch frontend assets.
 
-Key env vars: `DATABASE_URL`, `REDIS_URL`, `USE_S3_MEDIA`, `FLY_API_TOKEN`.
+Key env vars: `DATABASE_URL`, `REDIS_URL`, `USE_S3_MEDIA`, `DJANGO_SETTINGS_MODULE`.
+
+Production deployment (systemd units + nginx config) lives in `deploy/`. See `deploy/README.md`.
 
 ## CI/CD
 
@@ -622,4 +621,3 @@ GitHub Actions runs on push/PR to `main`:
 - `tests.yml`: pytest with PostgreSQL and Redis services
 - `pre-commit.yml`: ruff, black, isort, pyupgrade
 - `migrations.yml`: checks for missing migrations (`--check --dry-run`)
-- `deploy.yml`: deploys to Fly.io via `flyctl deploy`

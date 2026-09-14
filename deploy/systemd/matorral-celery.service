@@ -1,0 +1,18 @@
+[Unit]
+Description=Matorral Celery worker + beat
+After=network.target postgresql.service redis-server.service
+Wants=postgresql.service redis-server.service
+
+[Service]
+Type=simple
+User=matorral
+Group=matorral
+WorkingDirectory=/opt/matorral
+EnvironmentFile=/opt/matorral/.env
+Environment=DJANGO_SETTINGS_MODULE=matorral.settings.production
+ExecStart=/opt/matorral/.venv/bin/celery -A matorral worker -l INFO --beat --pool=prefork --concurrency=2
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

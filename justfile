@@ -3,6 +3,9 @@
 # https://github.com/casey/just
 # =============================================================================
 #
+# Runs natively — no Docker. Requires PostgreSQL, Redis, Node.js and `uv`
+# installed and reachable locally (see README.md / deploy/README.md).
+#
 # Quick start:
 #   just init              # First-time setup
 #   just start             # Start all services
@@ -23,7 +26,7 @@ default:
 # Development Environment
 # =============================================================================
 
-# First-time setup: copy .env, build, start services, migrate, seed DB (WARNING: resets DB!)
+# First-time setup: copy .env, install deps, migrate
 [doc("Initialize project for first-time development")]
 init:
     #!/usr/bin/env bash
@@ -32,48 +35,45 @@ init:
     if [ ! -f .env ]; then
         echo "📋 Copying .env.example to .env..."
         cp .env.example .env
+        echo "   Edit .env: set DATABASE_URL/REDIS_URL if not using the defaults."
     fi
-    echo "🐳 Building and starting containers..."
-    docker compose up -d --build
-    echo "⏳ Waiting for services to be healthy..."
-    sleep 5
+    echo "📦 Installing Python dependencies (uv sync)..."
+    uv sync
+    echo "📦 Installing Node dependencies..."
+    npm install
     echo "🗄️  Running migrations..."
     just migrate
     echo "✅ Initialization complete! Run 'just doctor' to verify."
 
-# Verify environment is ready (check .env, containers, migrations)
+# Verify environment is ready (check .env, venv, DB connectivity, migrations)
 [doc("Check if development environment is properly configured")]
 doctor:
     #!/usr/bin/env bash
     set -euo pipefail
     echo "🔍 Running environment checks..."
     FAILED=0
-    # Check .env exists
     if [ ! -f .env ]; then
         echo "❌ .env file missing - run 'just init'"
         FAILED=1
     else
         echo "✅ .env file exists"
     fi
-    # Check containers are running
-    if docker compose ps | grep -q "Up"; then
-        echo "✅ Docker containers are running"
+    if uv run python -c "import django" 2>/dev/null; then
+        echo "✅ Virtualenv OK (Django importable)"
     else
-        echo "❌ Docker containers not running - run 'just start'"
-        FAILED=1
-       fi
-    # Check Django can import
-    if docker compose exec -T django python -c "import django" 2>/dev/null; then
-        echo "✅ Django is accessible"
-    else
-        echo "❌ Django not accessible - check logs with 'just logs'"
+        echo "❌ Virtualenv not ready - run 'just init' (uv sync)"
         FAILED=1
     fi
-    # Check for unapplied migrations
-    if docker compose run --rm django python manage.py showmigrations --plan 2>/dev/null | grep -q "\[ \]"; then
-        echo "⚠️  Unapplied migrations found - run 'just migrate'"
+    if uv run python manage.py showmigrations --plan >/dev/null 2>&1; then
+        echo "✅ Database reachable"
+        if uv run python manage.py showmigrations --plan 2>/dev/null | grep -q "\[ \]"; then
+            echo "⚠️  Unapplied migrations found - run 'just migrate'"
+        else
+            echo "✅ All migrations applied"
+        fi
     else
-        echo "✅ All migrations applied"
+        echo "❌ Cannot reach the database - check DATABASE_URL in .env and that PostgreSQL is running"
+        FAILED=1
     fi
     if [ $FAILED -eq 0 ]; then
         echo "🎉 Environment is healthy!"
@@ -83,82 +83,79 @@ doctor:
         exit 1
     fi
 
-# Rebuild Docker images and restart (use after Dockerfile changes)
-[doc("Rebuild containers after Dockerfile or requirements changes")]
-rebuild: stop
-    docker compose up -d --build
-    @echo "✅ Rebuild complete. Run 'just doctor' to verify."
+# Refresh the virtualenv after pyproject.toml/uv.lock changes
+[doc("Refresh the virtualenv after dependency changes")]
+rebuild:
+    uv sync
+    @echo "✅ Virtualenv refreshed."
 
 # =============================================================================
-# Container Lifecycle
+# Dev Process Lifecycle (Django + Celery + Vite)
 # =============================================================================
 
-# Start all Docker containers in the foreground (logs visible)
+# Start Django, Celery and Vite together in the foreground (Ctrl+C stops all)
 [doc("Start all services in foreground (logs visible, Ctrl+C to stop)")]
 start:
-    docker compose up
+    #!/usr/bin/env bash
+    set -euo pipefail
+    trap 'kill $(jobs -p) 2>/dev/null' EXIT INT TERM
+    uv run python manage.py runserver 0.0.0.0:8000 &
+    uv run celery -A matorral worker -l INFO --beat --pool=prefork --concurrency=2 &
+    npm run dev -- --host &
+    wait
 
-# Start all Docker containers in detached mode (background)
+# Start the same three processes in the background
 [doc("Start all services in background")]
 start-detached:
-    docker compose up -d
-    @echo "✅ Services started. Use 'just logs' to view logs."
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p .dev-pids
+    nohup uv run python manage.py runserver 0.0.0.0:8000 > .dev-pids/django.log 2>&1 & echo $! > .dev-pids/django.pid
+    nohup uv run celery -A matorral worker -l INFO --beat --pool=prefork --concurrency=2 > .dev-pids/celery.log 2>&1 & echo $! > .dev-pids/celery.pid
+    nohup npm run dev -- --host > .dev-pids/vite.log 2>&1 & echo $! > .dev-pids/vite.pid
+    echo "✅ Services started. Logs in .dev-pids/*.log. Use 'just status' / 'just stop'."
 
-# Stop and remove all Docker containers
+# Stop the background processes started by start-detached
 [doc("Stop all services")]
 stop:
-    docker compose down
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for name in django celery vite; do
+        pidfile=".dev-pids/$name.pid"
+        if [ -f "$pidfile" ]; then
+            pid="$(cat "$pidfile")"
+            if kill "$pid" 2>/dev/null; then
+                echo "🛑 Stopped $name (pid $pid)"
+            fi
+            rm -f "$pidfile"
+        fi
+    done
 
-# Restart all Docker containers in the foreground (runs sequentially)
+# Restart all processes in the foreground (runs sequentially)
 [doc("Restart all services in foreground")]
 restart:
     just stop
     just start
 
-# Restart all Docker containers in detached mode
+# Restart all processes in the background
 [doc("Restart all services in background")]
 restart-detached:
     just stop
     just start-detached
 
-# Show status of all containers
-[doc("Show status of all containers")]
+# Show status of the background dev processes
+[doc("Show status of all services")]
 status:
-    docker compose ps
-
-# =============================================================================
-# Logs
-# =============================================================================
-
-# Follow live logs from all Docker containers
-[doc("Follow logs from all services")]
-logs:
-    docker compose logs -f
-
-# Follow logs from Django only
-[doc("Follow Django logs only")]
-logs-django:
-    docker compose logs -f django
-
-# Follow logs from database only
-[doc("Follow PostgreSQL logs only")]
-logs-db:
-    docker compose logs -f db
-
-# Follow logs from Redis only
-[doc("Follow Redis logs only")]
-logs-redis:
-    docker compose logs -f redis
-
-# Follow logs from Celery only
-[doc("Follow Celery worker logs only")]
-logs-celery:
-    docker compose logs -f celery
-
-# Follow logs from Vite only
-[doc("Follow Vite dev server logs only")]
-logs-vite:
-    docker compose logs -f vite
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for name in django celery vite; do
+        pidfile=".dev-pids/$name.pid"
+        if [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
+            echo "✅ $name running (pid $(cat "$pidfile"))"
+        else
+            echo "❌ $name not running"
+        fi
+    done
 
 # =============================================================================
 # Django Commands
@@ -167,52 +164,52 @@ logs-vite:
 # Run arbitrary Django management command (e.g., `just manage shell`, `just manage dbshell`)
 [doc("Run any Django management command: just manage <command>")]
 manage *args:
-    docker compose run --rm django python manage.py {{args}}
+    uv run python manage.py {{args}}
 
 # Apply pending Django database migrations
 [doc("Apply database migrations")]
 migrate:
-    docker compose run --rm django python manage.py migrate
+    uv run python manage.py migrate
 
 # Generate new Django database migrations
 [doc("Create new database migrations")]
 make-migrations *args:
-    docker compose run --rm django python manage.py makemigrations {{args}}
+    uv run python manage.py makemigrations {{args}}
 
 # Check for missing migrations (CI-friendly)
 [doc("Check for uncreated migrations (CI-friendly)")]
 check-migrations:
-    docker compose run --rm django python manage.py makemigrations --check --dry-run
+    uv run python manage.py makemigrations --check --dry-run
 
 # Open an interactive Django Python shell
 [doc("Open Django shell")]
 shell:
-    docker compose run --rm django python manage.py shell
+    uv run python manage.py shell
 
-# Open a PostgreSQL database shell (psql)
+# Open a PostgreSQL database shell (uses DATABASE_URL from .env)
 [doc("Open PostgreSQL shell")]
 dbshell:
-    docker compose exec db psql -U postgres matorral
+    uv run python manage.py dbshell
 
 # Run the Django createsuperuser management command
 [doc("Create a superuser interactively")]
 createsuperuser:
-    docker compose run --rm django python manage.py createsuperuser
+    uv run python manage.py createsuperuser
 
 # Promote an existing user to staff and superuser by email
 [doc("Promote user to superuser: just make-superuser <email>")]
 make-superuser email:
-    docker compose run --rm django python manage.py make_superuser {{email}}
+    uv run python manage.py make_superuser {{email}}
 
 # Load fixture data (e.g., `just loaddata initial_data`)
 [doc("Load fixture data: just loaddata <fixture_name>")]
 loaddata *args:
-    docker compose run --rm django python manage.py loaddata {{args}}
+    uv run python manage.py loaddata {{args}}
 
 # Dump data to fixture (e.g., `just dumpdata auth.User > users.json`)
 [doc("Dump data to fixture")]
 dumpdata *args:
-    docker compose run --rm django python manage.py dumpdata {{args}}
+    uv run python manage.py dumpdata {{args}}
 
 # =============================================================================
 # Testing
@@ -221,17 +218,17 @@ dumpdata *args:
 # Run Django tests (e.g., `just test apps.issues`, `just test apps.issues.tests.test_models`)
 [doc("Run Django tests: just test [path.to.module]")]
 test *args:
-    docker compose run --rm django python manage.py test {{args}}
+    uv run python manage.py test {{args}}
 
 # Run tests under coverage
 [doc("Run tests with coverage reporting")]
 test-cov *args:
-    docker compose run --rm django uv run coverage run manage.py test apps {{args}}
+    uv run coverage run manage.py test apps {{args}}
 
 # Generate coverage JSON + terminal report
 [doc("Generate coverage reports")]
 cov-report:
-    docker compose run --rm django sh -c "uv run coverage json && uv run coverage report"
+    uv run coverage json && uv run coverage report
 
 # Run tests under coverage and generate reports
 [doc("Run tests with coverage and generate reports")]
@@ -273,9 +270,9 @@ check: test check-migrations pre-commit
 # Extract and compile Django translation messages (.po/.mo files)
 [doc("Update translation files (.po/.mo)")]
 make-translations:
-    docker compose run --rm --no-deps django python manage.py makemessages --all --ignore node_modules --ignore venv --ignore .venv
-    docker compose run --rm --no-deps django python manage.py makemessages -d djangojs --all --ignore node_modules --ignore venv --ignore .venv
-    docker compose run --rm --no-deps django python manage.py compilemessages --ignore venv --ignore .venv
+    uv run python manage.py makemessages --all --ignore node_modules --ignore venv --ignore .venv
+    uv run python manage.py makemessages -d djangojs --all --ignore node_modules --ignore venv --ignore .venv
+    uv run python manage.py compilemessages --ignore venv --ignore .venv
 
 # =============================================================================
 # Frontend (Node.js/Vite)
@@ -284,109 +281,90 @@ make-translations:
 # Install all Node.js dependencies
 [doc("Install all Node.js dependencies")]
 npm-install-all:
-    docker compose run --rm --no-deps vite npm install
+    npm install
 
 # Install specific Node.js packages (e.g., `just npm-install react`)
 [doc("Install specific npm packages: just npm-install <package>")]
 npm-install *args:
-    docker compose run --rm --no-deps vite npm install {{args}}
+    npm install {{args}}
 
 # Uninstall specific Node.js packages (e.g., `just npm-uninstall react`)
 [doc("Uninstall specific npm packages: just npm-uninstall <package>")]
 npm-uninstall *args:
-    docker compose run --rm --no-deps vite npm uninstall {{args}}
+    npm uninstall {{args}}
 
 # Build frontend assets for production using Vite
 [doc("Build frontend assets for production")]
 npm-build:
-    docker compose run --rm --no-deps vite npm run build
+    npm run build
 
 # Start the Vite development server for frontend assets
 [doc("Start Vite dev server (foreground)")]
 npm-dev:
-    docker compose run --rm --no-deps vite npm run dev
+    npm run dev
 
 # Run TypeScript type checking on frontend code
 [doc("Run TypeScript type checker")]
 npm-type-check:
-    docker compose run --rm --no-deps vite npm run type-check
+    npm run type-check
 
 # Run TypeScript type checking in watch mode
 [doc("Run TypeScript type checker in watch mode")]
 npm-type-check-watch:
-    docker compose run --rm --no-deps vite npm run type-check-watch
+    npm run type-check-watch
 
 # =============================================================================
-# Shell Access
+# Production Deployment (systemd + nginx, see deploy/README.md)
 # =============================================================================
 
-# Open an interactive bash session in the running Django container
-[doc("Open bash in running Django container")]
-bash:
-    docker compose exec django bash
+# Restart the production services
+[doc("Restart the production services (django + celery)")]
+prod-restart:
+    sudo systemctl restart matorral-django matorral-celery
 
-# Spawn a new temporary Django container with a bash shell
-[doc("Spawn temporary Django container with bash")]
-bash-temp:
-    docker compose run --rm --no-deps django bash
+# Show status of the production services
+[doc("Show status of the production services")]
+prod-status:
+    sudo systemctl status matorral-django matorral-celery nginx --no-pager
 
-# Open bash in the Vite container
-[doc("Open bash in Vite container")]
-bash-vite:
-    docker compose exec vite bash
+# Follow Django production logs
+[doc("Follow Django production logs")]
+prod-logs-django:
+    sudo journalctl -u matorral-django -f
 
-# Open bash in the database container
-[doc("Open bash in PostgreSQL container")]
-bash-db:
-    docker compose exec db bash
+# Follow Celery production logs
+[doc("Follow Celery production logs")]
+prod-logs-celery:
+    sudo journalctl -u matorral-celery -f
 
-# =============================================================================
-# Production Deployment (plain HTTP, docker-compose.prod.yml)
-# =============================================================================
-
-# Build and start the production stack (nginx on 80 + gunicorn + celery)
-[doc("Start the production stack")]
-prod-up:
-    docker compose -f docker-compose.prod.yml up -d --build
-
-# Stop the production stack
-[doc("Stop the production stack")]
-prod-down:
-    docker compose -f docker-compose.prod.yml down
-
-# Follow logs from the production stack
-[doc("Follow logs from the production stack")]
-prod-logs:
-    docker compose -f docker-compose.prod.yml logs -f
+# Follow nginx production logs
+[doc("Follow nginx production logs")]
+prod-logs-nginx:
+    sudo journalctl -u nginx -f
 
 # =============================================================================
 # Cleanup
 # =============================================================================
 
-# Remove all containers, volumes, and orphaned containers (WARNING: deletes DB!)
-[doc("Clean everything - WARNING: deletes all data!")]
+# Remove the virtualenv and node_modules (does NOT touch the database)
+[doc("Remove virtualenv and node_modules - does not touch the database")]
 clean:
     #!/usr/bin/env bash
     set -euo pipefail
-    echo "⚠️  This will remove all containers and DELETE YOUR DATABASE!"
+    echo "⚠️  This removes .venv and node_modules. The database is left untouched."
     read -p "Are you sure? [y/N] " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        docker compose down -v --remove-orphans
+        rm -rf .venv node_modules
         echo "✅ Cleanup complete. Run 'just init' to start fresh."
     else
         echo "❌ Cancelled."
     fi
 
-# Remove stopped containers and dangling images
-[doc("Prune stopped containers and unused images")]
-prune:
-    docker system prune -f
-
 # =============================================================================
 # Legacy/Deprecated (kept for compatibility)
 # =============================================================================
 
-# Rebuild Docker images and restart containers (alias for rebuild)
+# Refresh the virtualenv (alias for 'just rebuild')
 [doc("Alias for 'just rebuild'")]
 requirements: rebuild

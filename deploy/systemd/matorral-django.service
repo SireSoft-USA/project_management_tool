@@ -1,0 +1,25 @@
+[Unit]
+Description=Matorral Django (Gunicorn)
+After=network.target postgresql.service redis-server.service
+Wants=postgresql.service redis-server.service
+
+[Service]
+Type=simple
+User=matorral
+Group=matorral
+WorkingDirectory=/opt/matorral
+EnvironmentFile=/opt/matorral/.env
+Environment=DJANGO_SETTINGS_MODULE=matorral.settings.production
+ExecStartPre=/opt/matorral/.venv/bin/python manage.py migrate --noinput
+ExecStart=/opt/matorral/.venv/bin/gunicorn \
+    --bind 127.0.0.1:8080 \
+    --workers 1 \
+    --threads 8 \
+    --timeout 0 \
+    matorral.asgi:application \
+    -k uvicorn.workers.UvicornWorker
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

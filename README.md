@@ -41,7 +41,8 @@ An example demo instance is available at **[matorral.dev](https://matorral.dev/)
 
 ### Requirements
 
-- [Docker](https://docs.docker.com/get-docker/) and Docker Compose
+- PostgreSQL 17, Redis, Node.js
+- [uv](https://docs.astral.sh/uv/) (Python dependency/venv manager)
 - [just](https://github.com/casey/just) command runner
 
 ### Setup
@@ -49,23 +50,20 @@ An example demo instance is available at **[matorral.dev](https://matorral.dev/)
 ```bash
 git clone https://github.com/matorral-project/matorral.git
 cd matorral
-just init               # First-time setup: copies .env, builds containers, runs migrations
+just init               # First-time setup: copies .env, installs deps, runs migrations
 ```
 
-This starts the containers and runs migrations. Then:
+Then:
 
 ```bash
-just start              # Start with logs (foreground)
+just start              # Start Django, Celery and Vite together (foreground)
 just start-detached     # Start in background
-just logs               # View all service logs
-just logs-django        # View Django logs only
-just logs-db            # View PostgreSQL logs only
 ```
 
 Verify your environment is ready:
 
 ```bash
-just doctor             # Check environment health (.env, containers, migrations)
+just doctor             # Check environment health (.env, venv, DB, migrations)
 ```
 
 Open http://localhost:8000. Create an admin account:
