@@ -7,12 +7,15 @@ This app now runs directly on the host — no Docker. Layout assumed below:
 - Python venv: `/opt/matorral/.venv` (created by `uv`)
 - Gunicorn listens on `127.0.0.1:8080`; nginx reverse-proxies to it on port 80.
 
-Commands below assume Debian/Ubuntu (`apt`). On RHEL/Rocky/CentOS, substitute
-`dnf`/`yum` and note the Postgres/Redis/nginx service names may differ
-slightly (`postgresql` vs `postgresql-server`, etc.).
+Commands below give both Debian/Ubuntu (`apt`) and RHEL/Rocky/CentOS 9
+(`dnf`) variants. Service names differ between them — this matters for the
+`After=`/`Wants=` lines in `deploy/systemd/*.service`, which are written for
+RHEL/CentOS (`postgresql-17.service`, `redis.service`); on Debian/Ubuntu
+change those to `postgresql.service` and `redis-server.service`.
 
 ## 1. Install system packages
 
+**Debian/Ubuntu:**
 ```bash
 sudo apt update
 sudo apt install -y postgresql postgresql-contrib redis-server nginx \
@@ -25,6 +28,29 @@ sudo apt install -y nodejs
 # uv (Python package/venv manager)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
+
+**RHEL/Rocky/CentOS 9** (the base OS package is PostgreSQL 13 — this project
+needs 17, installed from the official PGDG repo instead):
+```bash
+sudo dnf install -y redis nginx gcc libpq-devel gettext git curl
+
+sudo dnf -qy module disable postgresql
+sudo dnf install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-x86_64/pgdg-redhat-repo-latest.noarch.rpm
+sudo dnf install -y postgresql17-server postgresql17-contrib
+sudo /usr/pgsql-17/bin/postgresql-17-setup initdb
+sudo systemctl enable --now postgresql-17
+sudo systemctl enable --now redis
+sudo systemctl enable --now nginx
+
+# Node.js
+curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash -
+sudo dnf install -y nodejs
+
+# uv
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+`psql`/`createuser`/`createdb` live under `/usr/pgsql-17/bin/` on this path —
+use the full path, or add it to `PATH`.
 
 ## 2. Create the app user and directory
 

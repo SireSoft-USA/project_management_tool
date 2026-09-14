@@ -1,7 +1,10 @@
 [Unit]
 Description=Matorral Celery worker + beat
-After=network.target postgresql.service redis-server.service
-Wants=postgresql.service redis-server.service
+# Service names shown are for RHEL/CentOS (PGDG postgresql17 package + the
+# stock `redis` package). On Debian/Ubuntu these are `postgresql.service`
+# and `redis-server.service` instead — adjust to match your distro.
+After=network.target postgresql-17.service redis.service
+Wants=postgresql-17.service redis.service
 
 [Service]
 Type=simple
