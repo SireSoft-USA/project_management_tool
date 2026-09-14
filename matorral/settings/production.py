@@ -22,7 +22,8 @@ CSRF_COOKIE_SECURE = SECURE_SSL_REDIRECT
 # SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 # SECURE_HSTS_PRELOAD = True
 
-USE_HTTPS_IN_ABSOLUTE_URLS = True
+# Links in emails must match the scheme the site is actually served over.
+USE_HTTPS_IN_ABSOLUTE_URLS = SECURE_SSL_REDIRECT
 
 # Override in the environment or uncomment below to lock down allowed hosts.
 # ALLOWED_HOSTS = ["example.com"]
