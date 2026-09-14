@@ -19,8 +19,15 @@ if [ ! -f .env ]; then
     exit 1
 fi
 
-# shellcheck disable=SC1091
-source .env
+# Read a single KEY=value out of .env without executing the file as a shell
+# script — .env commonly holds values (passwords, URLs, quoted strings) that
+# aren't valid shell syntax, so `source .env` is unsafe.
+env_var() {
+    sed -n "s/^$1=//p" .env | tail -n1 | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'\$//"
+}
+
+DOMAIN="$(env_var DOMAIN)"
+CERTBOT_EMAIL="$(env_var CERTBOT_EMAIL)"
 
 : "${DOMAIN:?Set DOMAIN in .env (e.g. DOMAIN=app.example.com)}"
 : "${CERTBOT_EMAIL:?Set CERTBOT_EMAIL in .env (e.g. CERTBOT_EMAIL=admin@example.com)}"
