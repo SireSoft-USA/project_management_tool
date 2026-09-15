@@ -83,6 +83,9 @@ sudo -u matorral $EDITOR .env
 ```
 
 Set at minimum:
+- `DEBUG=False` (must be explicit — see the comment in `.env.example`; a
+  missing `DEBUG` crashes every management command with
+  `ModuleNotFoundError: No module named 'daphne'`)
 - `SECRET_KEY` (unique, random)
 - `DATABASE_URL="postgresql://matorral:<password>@localhost:5432/matorral"`
 - `REDIS_URL="redis://localhost:6379"`
