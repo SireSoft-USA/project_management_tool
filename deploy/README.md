@@ -1,5 +1,9 @@
 # Native (non-Docker) deployment
 
+First-time install. For deploying an update to an already-running host —
+pulling code, rebuilding assets, restarting services, rolling back, and the
+`.env` faults that fail silently — see [RUNBOOK.md](RUNBOOK.md).
+
 This app now runs directly on the host — no Docker. Layout assumed below:
 
 - App user/group: `matorral`
