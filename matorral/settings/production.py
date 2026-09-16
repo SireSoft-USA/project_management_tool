@@ -28,6 +28,11 @@ USE_HTTPS_IN_ABSOLUTE_URLS = SECURE_SSL_REDIRECT
 # Override in the environment or uncomment below to lock down allowed hosts.
 # ALLOWED_HOSTS = ["example.com"]
 
+# Trusted origins for Django's CSRF Origin check. Only needed once HTTPS is
+# in front of the site — each entry needs an explicit scheme, e.g.
+# "https://pmt.siresoft.net". Comma-separated in the environment.
+CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
+
 # Mailgun via django-anymail by default. Set MAILGUN_API_KEY and
 # MAILGUN_SENDER_DOMAIN in the environment to use it.
 #
