@@ -28,8 +28,17 @@ USE_HTTPS_IN_ABSOLUTE_URLS = SECURE_SSL_REDIRECT
 # Override in the environment or uncomment below to lock down allowed hosts.
 # ALLOWED_HOSTS = ["example.com"]
 
-# Mailgun via django-anymail. Set MAILGUN_API_KEY and MAILGUN_SENDER_DOMAIN in the environment.
-EMAIL_BACKEND = "anymail.backends.mailgun.EmailBackend"
+# Mailgun via django-anymail by default. Set MAILGUN_API_KEY and
+# MAILGUN_SENDER_DOMAIN in the environment to use it.
+#
+# Read from the environment rather than hardcoded so a deployment can send
+# through its own SMTP server instead. This module is imported *after*
+# settings.py, so a plain assignment here silently overrode whatever
+# EMAIL_BACKEND the .env had set — with no Mailgun API key configured, that
+# meant every notification was handed to a backend that could not deliver it,
+# and nothing was sent. Failing that way is invisible: the send raises no
+# error the app surfaces, so the only symptom is mail that never arrives.
+EMAIL_BACKEND = env("EMAIL_BACKEND", default="anymail.backends.mailgun.EmailBackend")
 
 ANYMAIL = {
     "MAILGUN_API_KEY": env("MAILGUN_API_KEY", default=None),
