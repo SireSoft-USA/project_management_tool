@@ -43,10 +43,10 @@ class TestHomeView(TestCase):
 
 
 class TestFaviconView(TestCase):
-    def test_get_returns_svg(self):
+    def test_get_returns_png(self):
         response = self.client.get(reverse("landing_pages:favicon"))
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response["Content-Type"], "image/svg+xml")
+        self.assertEqual(response["Content-Type"], "image/png")
 
     def test_post_returns_405(self):
         response = self.client.post(reverse("landing_pages:favicon"))

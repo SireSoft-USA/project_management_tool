@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.contrib.staticfiles import finders
 from django.http import Http404, HttpResponse, HttpResponseRedirect
 from django.shortcuts import render
 from django.urls import reverse
@@ -10,6 +11,8 @@ from django.views.decorators.http import require_GET
 from apps.workspaces.models import Workspace
 
 from health_check.views import MainView
+
+FAVICON_STATIC_PATH = "images/favicon-32.png"
 
 
 def home(request):
@@ -45,14 +48,11 @@ def home(request):
 @require_GET
 @cache_control(max_age=60 * 60 * 24, immutable=True, public=True)  # one day
 def favicon(request):
-    return HttpResponse(
-        '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">'
-        '<rect width="64" height="64" rx="8" fill="#588157"/>'
-        '<text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" '
-        'font-family="sans-serif" font-size="9" font-weight="bold" fill="white">matorral</text>'
-        "</svg>",
-        content_type="image/svg+xml",
-    )
+    path = finders.find(FAVICON_STATIC_PATH)
+    if not path:
+        raise Http404
+    with open(path, "rb") as f:
+        return HttpResponse(f.read(), content_type="image/png")
 
 
 def health_check(request, *args, **kwargs):
