@@ -10,14 +10,24 @@
    hx-get="{% url 'landing_pages:home' %}"
    hx-push-url="true"
    hx-target="#page-content"
-   class="is-drawer-close:hidden flex-1 pl-4">
-   
-   {# Wordmark is a 4:1 banner, so it is sized by width and left to keep its aspect ratio. #}
+   class="is-drawer-close:hidden flex-1 pl-2 overflow-hidden flex items-center gap-0.5">
+
    <img
-     src="{% static 'images/header-logo.png' %}"
-     alt="Siresoft"
-     class="h-8 w-auto object-contain"
+     src="{% static 'images/header-icon2.png' %}"
+     alt=""
+     class="h-8 w-auto object-contain shrink-0"
    />
+   {# Wordmark and tagline stack in a column so the tagline naturally starts at the same x as "SireSoft". #}
+   <span class="flex flex-col leading-none">
+     <img
+       src="{% static 'images/header-wordmark2.png' %}"
+       alt="Siresoft"
+       class="h-5 w-auto object-contain"
+     />
+     <span class="text-[5px] font-bold text-white tracking-wide mt-0.5 block w-full text-center">
+       {% translate "Leader in Innovation" %}
+     </span>
+   </span>
 
 </a>
     <!-- Desktop collapse toggle (hidden on mobile — mobile uses the navbar hamburger) -->

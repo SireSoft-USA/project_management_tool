@@ -44,6 +44,9 @@ matorral.egg-info/
 # PIDs/logs for `just start-detached` / `just stop`
 .dev-pids/
 
+# Redis snapshot dumped by a locally-run redis-server
+dump.rdb
+
 # Local environment pins — not used by the production build, which
 # installs from pyproject.toml.
 requirements-local.txt
