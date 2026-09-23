@@ -13,12 +13,26 @@
   />
   <!-- Overlay -->
   <div class="absolute inset-0 bg-[#0525A8]/10 flex flex-col items-center justify-center">
+    <div class="flex items-center gap-1.5 mb-8">
+      <img
+        src="{% static 'images/header-icon2.png' %}"
+        alt=""
+        class="h-12 w-auto object-contain shrink-0"
+      />
+      <span class="flex flex-col leading-none">
+        <img
+          src="{% static 'images/header-wordmark2.png' %}"
+          alt="Siresoft"
+          class="h-8 w-auto object-contain"
+        />
+        <span class="text-xs font-bold text-white tracking-wide mt-1 block w-full text-center">
+          {% translate "Leader in Innovation" %}
+        </span>
+      </span>
+    </div>
     <h1 class="text-white text-4xl font-bold tracking-wide">
       {% block page_heading %}SireSoft Project Management Tool{% endblock %}
     </h1>
-    <p class="text-white/80 text-md mt-2">
-      Home / {% block page_title %}{% endblock %}
-    </p>
   </div>
 </div>
 

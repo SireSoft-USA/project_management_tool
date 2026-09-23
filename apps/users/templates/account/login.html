@@ -1,22 +1,13 @@
 {% extends "anonymous_base.html" %}
 {% load i18n %}
-{% load static %}
 {% load forms_tags %}
-{% block page_heading %}{% translate "Login Page" %}{% endblock %}
+{% block page_heading %}{% translate "SireSoft Project Management Tool" %}{% endblock %}
 {% block page_title %}{% translate "Login" %}{% endblock %}
 {% block content %}
   <div class="w-[28rem] px-4 py-4">
     <div class="card bg-base-100 shadow-xl border border-base-300 px-6 py-8">
       <div class="flex flex-col items-center text-center">
-        <img
-          src="{% static 'images/header-logo.png' %}"
-          alt="SireSoft"
-          class="h-10 w-auto object-contain"
-        />
-        <h2 class="text-xl font-bold text-base-content mt-3 whitespace-nowrap">
-          {% translate "SireSoft Project Management Tool" %}
-        </h2>
-        <p class="text-sm text-base-content/60 mt-1">
+        <p class="text-sm text-base-content/60">
           {% translate "Sign in to your workspace" %}
         </p>
       </div>
